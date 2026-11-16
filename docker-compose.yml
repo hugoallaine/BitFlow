@@ -12,6 +12,7 @@ services:
       # BITFLOW_CONTACT: https://media.example.ch # contact pour MusicBrainz
       BITFLOW_LANG: fr-FR
       TMDB_TOKEN: ${TMDB_TOKEN:-}
+      # FANART_KEY: ${FANART_KEY:-} # images d'artistes (clé gratuite sur fanart.tv)
       # BITFLOW_IMG_POSTER: w342 # taille unique stockée par type d'image
       # BITFLOW_IMG_BACKDROP: w780
       # BITFLOW_HWACCEL: vaapi # none | vaapi | nvenc | qsv

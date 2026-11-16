@@ -24,6 +24,11 @@ pub struct Item {
     pub artist: Option<String>,
     /// Musique : durée de la piste en secondes.
     pub duration: Option<f64>,
+    /// Musique : volume intégré (LUFS) et pic vrai (linéaire) de la piste et de son album, pour la normalisation.
+    pub loudness: Option<f64>,
+    pub peak: Option<f64>,
+    pub album_loudness: Option<f64>,
+    pub album_peak: Option<f64>,
     pub position: f64,
     pub watched: bool,
 }

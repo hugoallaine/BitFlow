@@ -7,7 +7,9 @@ Serveur multimédia auto-hébergé en Rust : films, séries et musique ; photos 
 - **Métadonnées** : TMDB (affiches, résumés, notes, identifiant IMDb). Les images sont téléchargées une fois par le serveur et servies depuis `/data/img` (une seule taille par type pour limiter le stockage) : les navigateurs ne contactent jamais TMDB.
 - **Lecture** : directe (HTTP Range) quand le navigateur sait lire le fichier, sinon transcodage HLS à la volée par ffmpeg, avec accélération matérielle (VAAPI, NVENC ou QSV).
 - **Lecteur** : reprise de lecture, choix de la piste audio, sous-titres intégrés (texte et image incrustée) ou en fichiers à côté de la vidéo (`Film.fr.srt`), sélection automatique selon les préférences de l'utilisateur (langue audio, langue des sous-titres, affichage jamais / si l'audio est dans une autre langue / toujours), qualité 1080p/720p/480p, vitesse, image dans l'image, plein écran, enchaînement des épisodes, raccourcis clavier (espace/k, ←/→, ↑/↓, f, m).
-- **Musique** : tags ID3/FLAC/MP4/Vorbis (lofty, repli ffprobe pour WMA…), compilations regroupées sous « Artistes divers », pochettes (`cover.jpg` du dossier, image intégrée, sinon Cover Art Archive) stockées en local, MusicBrainz pour l'identifiant et l'année. Lecture directe (MP3, AAC, FLAC, Opus, Vorbis, WAV) ou conversion MP3 (WMA, APE, ALAC). Barre de lecture persistante : file d'attente, aléatoire, répétition, touches multimédia et écran verrouillé (Media Session).
+- **Musique** : tags ID3/FLAC/MP4/Vorbis (lofty, repli ffprobe pour WMA…), compilations regroupées sous « Artistes divers », pochettes (`cover.jpg` du dossier, image intégrée, sinon Cover Art Archive) stockées en local, MusicBrainz pour l'identifiant et l'année. Lecture directe (MP3, AAC, FLAC, Opus, Vorbis, WAV) ou conversion MP3 (WMA, APE, ALAC). Barre de lecture persistante : file d'attente, aléatoire, répétition, minuterie, touches multimédia et écran verrouillé (Media Session).
+- **Audio (inspiré de Plexamp)** : normalisation du volume par piste/album/automatique (tags ReplayGain ou analyse EBU R128 par le serveur, cible -18 LUFS, gain plafonné au pic), enchaînement sans blanc, fondu enchaîné 0-12 s avec fondu intelligent (aucun fondu entre pistes consécutives d'un album), égaliseur 10 bandes avec préréglages et pré-ampli, limiteur. Réglages propres à chaque appareil.
+- **Images d'artistes** : `artist.jpg` / `artist-poster.jpg` dans le dossier de l'artiste (convention Plex), sinon Fanart.tv avec une clé personnelle gratuite.
 - **Téléchargement** : qualité choisie dans les paramètres (originale, 4K, 1080p, 720p, 480p). Hors originale, le serveur convertit en MP4 (une conversion à la fois, copies supprimées après 24 h) ; une source H.264 déjà assez petite est simplement réemballée.
 - **Authentification** : phrase secrète (Argon2id, NIST SP 800-63B-4 : 15 caractères minimum, contrôle Have I Been Pwned, verrouillage après 10 échecs) ou SSO OIDC (Authorization Code + PKCE, nonce, `at_hash`, RFC 9700).
 
@@ -39,6 +41,7 @@ series/  Breaking Bad/Saison 1/Breaking.Bad.S01E02.mkv   (ou 1x02)
 | `BITFLOW_MOVIES` / `BITFLOW_SHOWS` | – | Dossiers des médias, séparés par des virgules. |
 | `BITFLOW_MUSIC` | – | Dossiers de musique, séparés par des virgules. |
 | `BITFLOW_CONTACT` | – | Contact ajouté au User-Agent MusicBrainz (URL ou e-mail), recommandé par leurs règles. |
+| `FANART_KEY` | – | Clé personnelle Fanart.tv (gratuite) pour les images d'artistes. |
 | `TMDB_TOKEN` | – | Jeton TMDB v4. Sans lui, pas de métadonnées. |
 | `BITFLOW_LANG` | `fr-FR` | Langue des métadonnées. |
 | `BITFLOW_HWACCEL` | `none` | `vaapi`, `nvenc` ou `qsv`. |

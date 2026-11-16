@@ -1,6 +1,7 @@
 mod api;
 mod auth;
 mod db;
+mod loudness;
 mod musicbrainz;
 mod scan;
 mod stream;
@@ -27,6 +28,8 @@ pub struct Config {
     pub music: Vec<PathBuf>,
     /// Contact ajouté au User-Agent MusicBrainz (URL ou e-mail de l'administrateur), recommandé par leurs règles.
     pub contact: Option<String>,
+    /// Clé personnelle Fanart.tv (gratuite) : images d'artistes.
+    pub fanart_key: Option<String>,
     pub url: String,
     pub tmdb_token: Option<String>,
     pub lang: String,
@@ -47,6 +50,7 @@ impl Config {
             shows: dirs("BITFLOW_SHOWS"),
             music: dirs("BITFLOW_MUSIC"),
             contact: var("BITFLOW_CONTACT"),
+            fanart_key: var("FANART_KEY"),
             url: var("BITFLOW_URL").unwrap_or("http://localhost:8080".into()).trim_end_matches('/').into(),
             tmdb_token: var("TMDB_TOKEN"),
             lang: var("BITFLOW_LANG").unwrap_or("fr-FR".into()),

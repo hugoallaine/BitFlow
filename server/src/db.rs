@@ -15,7 +15,8 @@ CREATE TABLE IF NOT EXISTS items(
   title TEXT NOT NULL, year INTEGER, overview TEXT, poster TEXT, backdrop TEXT,
   season INTEGER, episode INTEGER, imdb_id TEXT, tmdb_id INTEGER, rating REAL,
   path TEXT NOT NULL UNIQUE, added INTEGER NOT NULL DEFAULT (unixepoch()),
-  matched INTEGER NOT NULL DEFAULT 0, orig_lang TEXT, artist TEXT, duration REAL, mbid TEXT);
+  matched INTEGER NOT NULL DEFAULT 0, orig_lang TEXT, artist TEXT, duration REAL, mbid TEXT,
+  loudness REAL, peak REAL, album_loudness REAL, album_peak REAL);
 CREATE INDEX IF NOT EXISTS items_parent ON items(parent_id, season, episode);
 CREATE INDEX IF NOT EXISTS items_kind ON items(kind, title);
 CREATE TABLE IF NOT EXISTS prefs(
@@ -31,6 +32,7 @@ CREATE TABLE IF NOT EXISTS progress(
 /// Colonnes de `bitflow_shared::Item`, progression de l'utilisateur `?1` incluse.
 pub const ITEM: &str = "SELECT i.id, i.kind, i.parent_id, i.title, i.year, i.overview, i.poster, i.backdrop,
   i.season, i.episode, i.imdb_id, i.tmdb_id, i.rating, i.artist, i.duration,
+  i.loudness, i.peak, i.album_loudness, i.album_peak,
   COALESCE(p.position, 0.0) AS position, COALESCE(p.watched, 0) AS watched
   FROM items i LEFT JOIN progress p ON p.item_id = i.id AND p.user_id = ?1 ";
 
@@ -52,6 +54,10 @@ pub async fn open(file: &Path) -> anyhow::Result<SqlitePool> {
         "ALTER TABLE items ADD COLUMN artist TEXT",
         "ALTER TABLE items ADD COLUMN duration REAL",
         "ALTER TABLE items ADD COLUMN mbid TEXT",
+        "ALTER TABLE items ADD COLUMN loudness REAL",
+        "ALTER TABLE items ADD COLUMN peak REAL",
+        "ALTER TABLE items ADD COLUMN album_loudness REAL",
+        "ALTER TABLE items ADD COLUMN album_peak REAL",
     ] {
         if let Err(e) = sqlx::query(m).execute(&pool).await
             && !e.to_string().contains("duplicate column")

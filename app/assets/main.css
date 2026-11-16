@@ -184,3 +184,17 @@ main { padding-bottom: 120px; }
   .track { grid-template-columns: 36px 1fr 50px; }
   .track .ghost { display: none; }
 }
+
+/* Égaliseur, minuterie */
+.switch { display: inline-flex; align-items: center; gap: .5rem; cursor: pointer; }
+.eq { display: grid; gap: .8rem; }
+.eq-head { display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
+.eq-bands { display: flex; justify-content: space-between; gap: .2rem; overflow-x: auto; }
+.eq-band { display: flex; flex-direction: column; align-items: center; gap: .3rem; min-width: 30px; }
+.eq-band small { color: var(--muted); font-size: .7rem; font-variant-numeric: tabular-nums; }
+.eq-band input[type=range] { writing-mode: vertical-lr; direction: rtl; height: 120px; width: 22px; }
+.eq-band input[type=range]::-webkit-slider-runnable-track { width: 4px; height: auto; }
+.eq-band input[type=range]::-webkit-slider-thumb { margin-top: 0; margin-left: -5px; }
+.eq-panel { width: min(520px, calc(100vw - 24px)); padding-top: 1rem; }
+.musicbar .icon.sleep { width: auto; border-radius: 18px; padding: 0 .5rem; gap: .3rem; display: inline-flex; }
+.musicbar .icon.sleep small { font-size: .7rem; }

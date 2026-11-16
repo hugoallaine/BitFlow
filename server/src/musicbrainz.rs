@@ -9,20 +9,71 @@ use crate::App;
 const PAUSE: Duration = Duration::from_millis(1100);
 
 pub async fn enrich(app: &App) -> anyhow::Result<()> {
-    let todo: Vec<(i64, String, Option<String>, Option<String>, bool)> = sqlx::query_as(
-        "SELECT id, title, artist, mbid, poster IS NOT NULL FROM items WHERE kind = 'album' AND matched = 0",
+    let todo: Vec<(i64, String, Option<String>, Option<String>, bool, Option<i64>)> = sqlx::query_as(
+        "SELECT id, title, artist, mbid, poster IS NOT NULL, parent_id FROM items WHERE kind = 'album' AND matched = 0",
     )
     .fetch_all(&app.db)
     .await?;
-    for (id, title, artist, mbid, has_cover) in todo {
-        if let Err(e) = album(app, id, &title, artist.as_deref(), mbid, has_cover).await {
+    for (id, title, artist, mbid, has_cover, artist_id) in todo {
+        if let Err(e) = album(app, id, &title, artist.as_deref(), mbid, has_cover, artist_id).await {
             tracing::warn!("MusicBrainz « {title} » : {e:#}");
         }
     }
+    artists(app).await?;
     propagate_covers(app).await
 }
 
-async fn album(app: &App, id: i64, title: &str, artist: Option<&str>, mbid: Option<String>, has_cover: bool) -> anyhow::Result<()> {
+const ARTIST_ART: &[&str] = &["artist.jpg", "artist-poster.jpg", "artist.png", "artist-poster.png"];
+
+/// Image d'artiste : fichier `artist.jpg` / `artist-poster.jpg` dans le dossier de l'artiste (convention Plex),
+/// sinon Fanart.tv (clé gratuite FANART_KEY, recherche par identifiant MusicBrainz).
+async fn artists(app: &App) -> anyhow::Result<()> {
+    let todo: Vec<(i64, Option<String>, Option<String>)> = sqlx::query_as(
+        "SELECT a.id, a.mbid, (SELECT t.path FROM items al JOIN items t ON t.parent_id = al.id WHERE al.parent_id = a.id LIMIT 1)
+         FROM items a WHERE a.kind = 'artist' AND a.matched = 0",
+    )
+    .fetch_all(&app.db)
+    .await?;
+    for (id, mbid, track) in todo {
+        // Piste -> dossier album -> dossier artiste.
+        let dir = track.as_deref().map(std::path::Path::new).and_then(|p| p.parent()?.parent());
+        let local = dir.and_then(|d| {
+            ARTIST_ART.iter().find_map(|f| Some((std::fs::read(d.join(f)).ok()?, if f.ends_with("png") { "png" } else { "jpg" })))
+        });
+        let image = match (local, &app.cfg.fanart_key, &mbid) {
+            (Some(img), _, _) => Some(img),
+            (None, Some(key), Some(mbid)) => fanart(app, key, mbid).await.unwrap_or_else(|e| {
+                tracing::warn!("Fanart.tv {mbid} : {e:#}");
+                None
+            }),
+            _ => None,
+        };
+        let state = match (&image, &app.cfg.fanart_key, &mbid) {
+            (Some(_), _, _) => 1,
+            (None, Some(_), Some(_)) => 2, // cherché, introuvable
+            _ => 0,                         // sans clé ni identifiant : on revérifiera le dossier au prochain scan
+        };
+        let poster = match image {
+            Some((bytes, ext)) => Some(save_image(app, format!("a{id}.{ext}"), &bytes).await?),
+            None => None,
+        };
+        sqlx::query("UPDATE items SET poster = COALESCE(?, poster), matched = ? WHERE id = ?").bind(poster).bind(state).bind(id).execute(&app.db).await?;
+    }
+    Ok(())
+}
+
+async fn fanart(app: &App, key: &str, mbid: &str) -> anyhow::Result<Option<(Vec<u8>, &'static str)>> {
+    let res = app.http.get(format!("https://webservice.fanart.tv/v3/music/{mbid}")).query(&[("api_key", key)]).send().await?;
+    if res.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(None);
+    }
+    let v: Value = res.error_for_status()?.json().await?;
+    let Some(url) = v["artistthumb"][0]["url"].as_str() else { return Ok(None) };
+    let bytes = app.http_follow.get(url).send().await?.error_for_status()?.bytes().await?;
+    Ok(Some((bytes.to_vec(), if url.ends_with(".png") { "png" } else { "jpg" })))
+}
+
+async fn album(app: &App, id: i64, title: &str, artist: Option<&str>, mbid: Option<String>, has_cover: bool, artist_id: Option<i64>) -> anyhow::Result<()> {
     // Identifiant déjà dans les tags (Picard, beets…) : pas de recherche.
     let (release, group, year) = match mbid {
         Some(m) => (Some(m), None, None),
@@ -36,6 +87,12 @@ async fn album(app: &App, id: i64, title: &str, artist: Option<&str>, mbid: Opti
             let r = &res["releases"][0];
             // Score MusicBrainz 0-100 : en dessous de 90, trop de faux positifs.
             if r["score"].as_i64().unwrap_or(0) >= 90 {
+                // Identifiant MusicBrainz de l'artiste : nécessaire pour son image (Fanart.tv).
+                if let (Some(a), Some(aid)) = (r["artist-credit"][0]["artist"]["id"].as_str(), artist_id)
+                    && artist.is_some_and(|n| n != crate::scan::VARIOUS)
+                {
+                    sqlx::query("UPDATE items SET mbid = COALESCE(mbid, ?) WHERE id = ?").bind(a).bind(aid).execute(&app.db).await?;
+                }
                 let year = r["date"].as_str().and_then(|d| d.get(..4)).and_then(|y| y.parse::<i64>().ok());
                 (r["id"].as_str().map(str::to_owned), r["release-group"]["id"].as_str().map(str::to_owned), year)
             } else {
@@ -84,17 +141,16 @@ async fn cover_art(app: &App, album: i64, release: &str, group: Option<&str>) ->
         let res = app.http_follow.get(&url).send().await?;
         if res.status().is_success() {
             let png = res.headers().get("content-type").is_some_and(|v| v.as_bytes().ends_with(b"png"));
-            return Ok(Some(save_cover(app, album, &res.bytes().await?, if png { "png" } else { "jpg" }).await?));
+            return Ok(Some(save_image(app, format!("c{album}.{}", if png { "png" } else { "jpg" }), &res.bytes().await?).await?));
         }
     }
     Ok(None)
 }
 
-/// Écrit `/data/img/cover/c{album}.{ext}` et renvoie le nom à stocker dans `poster`.
-pub async fn save_cover(app: &App, album: i64, bytes: &[u8], ext: &str) -> anyhow::Result<String> {
+/// Écrit `/data/img/cover/{name}` (c12.jpg = album, a3.jpg = artiste) et renvoie le nom à stocker dans `poster`.
+pub async fn save_image(app: &App, name: String, bytes: &[u8]) -> anyhow::Result<String> {
     let dir = app.cfg.data.join("img").join("cover");
     tokio::fs::create_dir_all(&dir).await?;
-    let name = format!("c{album}.{ext}");
     tokio::fs::write(dir.join(&name), bytes).await?;
     Ok(name)
 }

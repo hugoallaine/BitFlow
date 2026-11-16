@@ -44,6 +44,7 @@ enum Route {
 #[component]
 fn App() -> Element {
     use_context_provider(|| Signal::new(music::Queue::default()));
+    use_context_provider(|| Signal::new(music::load_settings()));
     rsx! {
         document::Title { "BitFlow" }
         document::Stylesheet { href: CSS }
@@ -460,6 +461,7 @@ fn Settings() -> Element {
     rsx! {
         h1 { "Paramètres" }
         PlaybackPrefs {}
+        music::MusicSettingsPanel {}
         section { class: "panel",
             h2 { "Téléchargements" }
             label { r#for: "quality", "Qualité des fichiers téléchargés" }

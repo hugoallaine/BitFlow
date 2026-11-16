@@ -32,6 +32,9 @@ pub async fn run(app: &App) {
     if let Err(e) = crate::musicbrainz::enrich(app).await {
         tracing::error!("MusicBrainz : {e:#}");
     }
+    if let Err(e) = crate::loudness::analyze(app).await {
+        tracing::error!("analyse du volume : {e:#}");
+    }
     RUNNING.store(false, Ordering::SeqCst);
 }
 
@@ -86,8 +89,9 @@ async fn scan(app: &App) -> anyhow::Result<()> {
     for t in tracks {
         let artist_key = t.album_artist.to_lowercase();
         let artist: i64 = sqlx::query_scalar(
-            "INSERT INTO items(kind, title, path) VALUES ('artist', ?, ?) ON CONFLICT(path) DO UPDATE SET kind = kind RETURNING id",
-        ).bind(&t.album_artist).bind(format!("music-artist:{artist_key}")).fetch_one(&mut *tx).await?;
+            "INSERT INTO items(kind, title, mbid, path) VALUES ('artist', ?, ?, ?)
+             ON CONFLICT(path) DO UPDATE SET mbid = COALESCE(items.mbid, excluded.mbid) RETURNING id",
+        ).bind(&t.album_artist).bind(&t.artist_mbid).bind(format!("music-artist:{artist_key}")).fetch_one(&mut *tx).await?;
         let (album, cover): (i64, Option<String>) = sqlx::query_as(
             "INSERT INTO items(kind, parent_id, title, artist, year, mbid, path) VALUES ('album', ?, ?, ?, ?, ?, ?)
              ON CONFLICT(path) DO UPDATE SET year = COALESCE(items.year, excluded.year), mbid = COALESCE(items.mbid, excluded.mbid)
@@ -95,12 +99,17 @@ async fn scan(app: &App) -> anyhow::Result<()> {
         ).bind(artist).bind(&t.album).bind(&t.album_artist).bind(t.year).bind(&t.mbid)
             .bind(format!("music-album:{artist_key}/{}", t.album.to_lowercase())).fetch_one(&mut *tx).await?;
         if let (None, Some((bytes, ext))) = (cover, &t.cover) {
-            let name = crate::musicbrainz::save_cover(app, album, bytes, ext).await?;
+            let name = crate::musicbrainz::save_image(app, format!("c{album}.{ext}"), bytes).await?;
             sqlx::query("UPDATE items SET poster = ? WHERE id = ?").bind(name).bind(album).execute(&mut *tx).await?;
         }
-        sqlx::query("INSERT INTO items(kind, parent_id, title, artist, season, episode, duration, path) VALUES ('track', ?, ?, ?, ?, ?, ?, ?)")
-            .bind(album).bind(&t.title).bind(&t.artist).bind(t.disc).bind(t.track).bind(t.duration).bind(t.path.to_str())
-            .execute(&mut *tx).await?;
+        // ReplayGain présent : pas besoin de mesurer (matched = 1).
+        sqlx::query(
+            "INSERT INTO items(kind, parent_id, title, artist, season, episode, duration, loudness, peak, album_loudness, album_peak, matched, path)
+             VALUES ('track', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(album).bind(&t.title).bind(&t.artist).bind(t.disc).bind(t.track).bind(t.duration)
+        .bind(t.rg.0).bind(t.rg.1).bind(t.rg.2).bind(t.rg.3).bind(t.rg.0.is_some()).bind(t.path.to_str())
+        .execute(&mut *tx).await?;
         added += 1;
     }
     tx.commit().await?;
@@ -133,6 +142,9 @@ struct TrackTags {
     year: Option<i64>,
     duration: f64,
     mbid: Option<String>,
+    artist_mbid: Option<String>,
+    /// ReplayGain converti : (volume piste LUFS, pic piste, volume album, pic album).
+    rg: (Option<f64>, Option<f64>, Option<f64>, Option<f64>),
     /// Pochette (octets, extension) : seulement pour la première piste de chaque dossier qui en a une.
     cover: Option<(Vec<u8>, &'static str)>,
 }
@@ -166,6 +178,13 @@ fn read_tracks(files: Vec<PathBuf>) -> Vec<TrackTags> {
                 year: tag.and_then(|t| t.date()).map(|d| d.year as i64),
                 duration: file.as_ref().map(|f| f.properties().duration().as_secs_f64()).or(probed.as_ref().map(|(_, d)| *d)).unwrap_or(0.0),
                 mbid: key(ItemKey::MusicBrainzReleaseId),
+                artist_mbid: key(ItemKey::MusicBrainzReleaseArtistId),
+                rg: (
+                    key(ItemKey::ReplayGainTrackGain).and_then(|g| crate::loudness::loudness_from_gain(&g)),
+                    key(ItemKey::ReplayGainTrackPeak).and_then(|p| p.trim().parse().ok()),
+                    key(ItemKey::ReplayGainAlbumGain).and_then(|g| crate::loudness::loudness_from_gain(&g)),
+                    key(ItemKey::ReplayGainAlbumPeak).and_then(|p| p.trim().parse().ok()),
+                ),
                 cover,
                 path,
             };
