@@ -1,0 +1,14 @@
+[workspace]
+members = ["shared", "server", "app"]
+resolver = "3"
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+strip = true
+
+# Profil utilisé par `dx bundle --web --release` : wasm-bindgen a besoin des sections non strippées.
+[profile.wasm-release]
+inherits = "release"
+strip = false
+opt-level = "z"

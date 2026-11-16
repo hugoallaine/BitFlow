@@ -1,0 +1,33 @@
+services:
+  bitflow:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      BITFLOW_URL: http://localhost:8080 # URL publique ; en https, cookie __Host- sécurisé
+      BITFLOW_MOVIES: /media/films
+      BITFLOW_SHOWS: /media/series
+      BITFLOW_MUSIC: /media/musique
+      # BITFLOW_CONTACT: https://media.example.ch # contact pour MusicBrainz
+      BITFLOW_LANG: fr-FR
+      TMDB_TOKEN: ${TMDB_TOKEN:-}
+      # BITFLOW_IMG_POSTER: w342 # taille unique stockée par type d'image
+      # BITFLOW_IMG_BACKDROP: w780
+      # BITFLOW_HWACCEL: vaapi # none | vaapi | nvenc | qsv
+      # OIDC_ISSUER: https://auth.example.ch/application/o/bitflow/
+      # OIDC_CLIENT_ID: bitflow
+      # OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+    volumes:
+      - bitflow-data:/data
+      - /chemin/vers/films:/media/films:ro
+      - /chemin/vers/series:/media/series:ro
+      - /chemin/vers/musique:/media/musique:ro
+    # Accélération matérielle VAAPI (Intel/AMD) :
+    # devices:
+    #   - /dev/dri:/dev/dri
+    # group_add:
+    #   - "105" # gid du groupe render de l'hôte : getent group render
+
+volumes:
+  bitflow-data:
