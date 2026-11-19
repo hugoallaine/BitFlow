@@ -20,8 +20,10 @@ Serveur multimédia auto-hébergé en Rust : films, séries et musique ; photos 
 3. Lancer :
 
 ```sh
-TMDB_TOKEN=eyJ... docker compose up -d --build
+TMDB_TOKEN=eyJ... docker compose up -d
 ```
+
+L'image `ghcr.io/hugoallaine/bitflow:latest` est publiée par la CI à chaque push sur `main` (tags `v1.2.3` → `:1.2.3`). Pour compiler localement : `docker compose up -d --build`.
 
 4. Ouvrir http://localhost:8080 : le premier compte créé est administrateur.
 

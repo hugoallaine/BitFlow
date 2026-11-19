@@ -1,6 +1,7 @@
 services:
   bitflow:
-    build: .
+    image: ghcr.io/hugoallaine/bitflow:latest
+    build: . # « docker compose up --build » pour compiler localement
     restart: unless-stopped
     ports:
       - "8080:8080"
