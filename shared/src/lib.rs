@@ -96,3 +96,20 @@ pub struct Progress {
     pub position: f64,
     pub watched: bool,
 }
+
+/// Un dossier de bibliothèque et son état, pour l'administration et l'accueil vide.
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+pub struct Library {
+    /// Films | Séries | Musiques
+    pub kind: String,
+    pub path: String,
+    /// Fichiers indexés (films, épisodes, pistes).
+    pub files: i64,
+    pub error: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+pub struct ScanStatus {
+    pub running: bool,
+    pub libraries: Vec<Library>,
+}

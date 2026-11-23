@@ -18,6 +18,20 @@ const FOLDER_ART: &[&str] = &["cover.jpg", "folder.jpg", "front.jpg", "cover.png
 pub const VARIOUS: &str = "Artistes divers";
 static RUNNING: AtomicBool = AtomicBool::new(false);
 
+pub fn running() -> bool {
+    RUNNING.load(Ordering::SeqCst)
+}
+
+/// Dossier absent ou illisible, avec la cause probable en Docker.
+pub fn root_error(root: &Path) -> Option<String> {
+    let e = std::fs::read_dir(root).err()?;
+    Some(match e.kind() {
+        std::io::ErrorKind::NotFound => "dossier introuvable : volume Docker monté ?".into(),
+        std::io::ErrorKind::PermissionDenied => "accès refusé : droits de lecture pour l'utilisateur 1000 ?".into(),
+        _ => e.to_string(),
+    })
+}
+
 /// Scan incrémental puis récupération des métadonnées. Un seul scan à la fois.
 pub async fn run(app: &App) {
     if RUNNING.swap(true, Ordering::SeqCst) {
@@ -41,6 +55,11 @@ pub async fn run(app: &App) {
 async fn scan(app: &App) -> anyhow::Result<()> {
     let known: Vec<String> = sqlx::query_scalar("SELECT path FROM items WHERE kind IN ('movie', 'episode', 'track')").fetch_all(&app.db).await?;
     let (movies, shows, music) = (app.cfg.movies.clone(), app.cfg.shows.clone(), app.cfg.music.clone());
+    // Dossier non monté ou illisible : on garde ses éléments au lieu de tout effacer (progression, métadonnées).
+    let broken: Vec<String> = movies.iter().chain(&shows).chain(&music)
+        .filter(|r| root_error(r).inspect(|e| tracing::warn!("bibliothèque {} : {e}", r.display())).is_some())
+        .map(|r| r.to_string_lossy().into_owned())
+        .collect();
     let known_set: HashSet<String> = known.iter().cloned().collect();
     // Parcours et lecture des tags (E/S disque bloquantes) hors du runtime async.
     let (movies, shows, music_files, tracks) = tokio::task::spawn_blocking(move || {
@@ -53,7 +72,7 @@ async fn scan(app: &App) -> anyhow::Result<()> {
     // Fichiers disparus : suppression, puis des conteneurs devenus vides.
     let present: HashSet<&str> = movies.iter().chain(&shows).chain(&music_files).filter_map(|(_, p)| p.to_str()).collect();
     let mut tx = app.db.begin().await?;
-    for p in known.iter().filter(|p| !present.contains(p.as_str())) {
+    for p in known.iter().filter(|p| !present.contains(p.as_str()) && !broken.iter().any(|b| p.starts_with(b.as_str()))) {
         sqlx::query("DELETE FROM items WHERE path = ?").bind(p).execute(&mut *tx).await?;
     }
     sqlx::query("DELETE FROM items WHERE kind = 'season' AND id NOT IN (SELECT parent_id FROM items WHERE kind = 'episode')").execute(&mut *tx).await?;

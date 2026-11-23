@@ -2,7 +2,7 @@ mod api;
 mod music;
 mod player;
 
-use bitflow_shared::{AuthConfig, Credentials, Item, Me, Prefs, Progress};
+use bitflow_shared::{AuthConfig, Credentials, Item, Me, Prefs, Progress, ScanStatus};
 use dioxus::prelude::*;
 use player::Play;
 
@@ -63,7 +63,7 @@ fn Shell() -> Element {
             nav {
                 Link { to: Route::Movies {}, "Films" }
                 Link { to: Route::Shows {}, "Séries" }
-                Link { to: Route::Music {}, "Musique" }
+                Link { to: Route::Music {}, "Musiques" }
             }
             form {
                 class: "search",
@@ -98,6 +98,17 @@ fn Shell() -> Element {
 
 #[component]
 fn Home() -> Element {
+    let mut status = use_resource(|| api::get::<ScanStatus>("/api/scan"));
+    let empty = matches!(&*status.read(), Some(Ok(s)) if s.libraries.iter().all(|l| l.files == 0));
+    if empty {
+        return rsx! {
+            section { class: "empty",
+                h1 { "Bienvenue sur BitFlow" }
+                p { class: "muted", "Aucun média pour l'instant. Vérifiez les dossiers ci-dessous puis lancez une analyse." }
+                LibraryPanel { on_done: move |_| status.restart() }
+            }
+        };
+    }
     rsx! {
         Row { title: "Reprendre", path: "/api/resume", play: true }
         Row { title: "Films récemment ajoutés", path: "/api/items?kind=movie&sort=added&limit=30" }
@@ -492,16 +503,7 @@ fn Admin() -> Element {
         h1 { "Administration" }
         section { class: "panel",
             h2 { "Bibliothèque" }
-            button {
-                class: "btn primary",
-                onclick: move |_| async move {
-                    msg.set(match api::post::<()>("/api/scan", &()).await {
-                        Ok(_) => "Analyse lancée en arrière-plan.".into(),
-                        Err(e) => e,
-                    });
-                },
-                "Analyser la bibliothèque"
-            }
+            LibraryPanel {}
         }
         section { class: "panel",
             h2 { "Nouvel utilisateur" }
@@ -521,6 +523,65 @@ fn Admin() -> Element {
             }
         }
         p { class: "muted", "{msg}" }
+    }
+}
+
+/// Dossiers de médias, nombre de fichiers indexés, erreurs d'accès et bouton d'analyse.
+#[component]
+fn LibraryPanel(#[props(default)] on_done: EventHandler<()>) -> Element {
+    let mut status = use_signal(|| None::<ScanStatus>);
+    let mut msg = use_signal(String::new);
+    // Recharge l'état toutes les 2 s tant qu'une analyse tourne.
+    let refresh = move |mut seen_running: bool| async move {
+        while let Ok(s) = api::get::<ScanStatus>("/api/scan").await {
+            let running = s.running;
+            status.set(Some(s));
+            if !running {
+                // Seulement après une analyse lancée ou suivie : l'accueil se recharge sans boucler.
+                if seen_running {
+                    on_done.call(());
+                }
+                break;
+            }
+            seen_running = true;
+            gloo_timers::future::TimeoutFuture::new(2000).await;
+        }
+    };
+    use_future(move || refresh(false));
+    let Some(s) = status() else { return rsx! {} };
+    rsx! {
+        div { class: "libs",
+            for l in s.libraries {
+                div { class: "lib",
+                    strong { "{l.kind}" }
+                    code { "{l.path}" }
+                    match l.error {
+                        Some(e) => rsx! { span { class: "error", "{e}" } },
+                        None => rsx! { span { class: "muted", "{l.files} fichiers" } },
+                    }
+                }
+            }
+        }
+        p { class: "muted small",
+            "Noms attendus : films « Titre (2020).mkv », séries « Série/Saison 1/Série S01E02.mkv », musiques selon les tags des fichiers."
+        }
+        button {
+            class: "btn primary",
+            disabled: s.running,
+            onclick: move |_| async move {
+                match api::post::<()>("/api/scan", &()).await {
+                    Ok(_) => {
+                        msg.set(String::new());
+                        // Laisse le serveur démarrer l'analyse avant de suivre son état.
+                        gloo_timers::future::TimeoutFuture::new(300).await;
+                        refresh(true).await;
+                    }
+                    Err(e) => msg.set(e),
+                }
+            },
+            if s.running { "Analyse en cours…" } else { "Analyser la bibliothèque" }
+        }
+        p { class: "error", "{msg}" }
     }
 }
 

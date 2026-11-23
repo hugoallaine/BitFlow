@@ -5,7 +5,7 @@ use axum::{
     response::IntoResponse,
     routing::{get, post},
 };
-use bitflow_shared::{AuthConfig, Credentials, Item, Me, Prefs, Progress};
+use bitflow_shared::{AuthConfig, Credentials, Item, Library, Me, Prefs, Progress, ScanStatus};
 use serde::Deserialize;
 
 use crate::{App, R, auth, auth::User, db::ITEM, err, scan, stream, tmdb};
@@ -20,7 +20,7 @@ pub fn routes() -> Router<App> {
         .route("/me", get(me))
         .route("/prefs", get(get_prefs).put(put_prefs))
         .route("/users", post(create_user))
-        .route("/scan", post(rescan))
+        .route("/scan", get(scan_status).post(rescan))
         .route("/items", get(list))
         .route("/resume", get(resume))
         .route("/search", get(search))
@@ -110,6 +110,27 @@ async fn create_user(State(app): State<App>, user: Option<User>, Json(c): Json<C
         Err(sqlx::Error::Database(e)) if e.is_unique_violation() => err(StatusCode::CONFLICT, "Ce nom est déjà utilisé."),
         Err(e) => Err(e.into()),
     }
+}
+
+/// Dossiers configurés, fichiers indexés et erreurs d'accès.
+async fn scan_status(State(app): State<App>, _u: User) -> R<Json<ScanStatus>> {
+    let mut libraries = vec![];
+    for (kind, var, roots, item) in [
+        ("Films", "BITFLOW_MOVIES", &app.cfg.movies, "movie"),
+        ("Séries", "BITFLOW_SHOWS", &app.cfg.shows, "episode"),
+        ("Musiques", "BITFLOW_MUSIC", &app.cfg.music, "track"),
+    ] {
+        if roots.is_empty() {
+            libraries.push(Library { kind: kind.into(), path: String::new(), files: 0, error: Some(format!("non configuré ({var})")) });
+        }
+        for root in roots {
+            let path = root.to_string_lossy().into_owned();
+            let files = sqlx::query_scalar("SELECT COUNT(*) FROM items WHERE kind = ?1 AND substr(path, 1, length(?2)) = ?2")
+                .bind(item).bind(&path).fetch_one(&app.db).await?;
+            libraries.push(Library { kind: kind.into(), error: scan::root_error(root), path, files });
+        }
+    }
+    Ok(Json(ScanStatus { running: scan::running(), libraries }))
 }
 
 async fn rescan(State(app): State<App>, u: User) -> R<StatusCode> {
