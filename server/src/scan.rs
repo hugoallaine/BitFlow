@@ -65,7 +65,11 @@ async fn scan(app: &App) -> anyhow::Result<()> {
     let (movies, shows, music_files, tracks) = tokio::task::spawn_blocking(move || {
         let music = walk(&music, AUDIO);
         let new: Vec<PathBuf> = music.iter().map(|(_, p)| p.clone()).filter(|p| !known_set.contains(p.to_str().unwrap_or_default())).collect();
-        (walk(&movies, VIDEO), walk(&shows, VIDEO), music, read_tracks(new))
+        // Dossier de séries inclus dans celui des films (BITFLOW_MOVIES=/media, BITFLOW_SHOWS=/media/series) : épisodes, pas films.
+        let shows = walk(&shows, VIDEO);
+        let in_shows: HashSet<&PathBuf> = shows.iter().map(|(_, p)| p).collect();
+        let movies: Vec<_> = walk(&movies, VIDEO).into_iter().filter(|(_, p)| !in_shows.contains(p)).collect();
+        (movies, shows, music, read_tracks(new))
     })
     .await?;
 
@@ -84,7 +88,7 @@ async fn scan(app: &App) -> anyhow::Result<()> {
     let mut added = 0;
     for (_, file) in movies.iter().filter(|(_, p)| !known.contains(p.to_str().unwrap_or_default())) {
         let (title, year) = movie_name(file);
-        sqlx::query("INSERT INTO items(kind, title, year, path) VALUES ('movie', ?, ?, ?)")
+        sqlx::query("INSERT INTO items(kind, title, year, path) VALUES ('movie', ?, ?, ?) ON CONFLICT(path) DO NOTHING")
             .bind(title).bind(year).bind(file.to_str()).execute(&mut *tx).await?;
         added += 1;
     }
@@ -101,7 +105,7 @@ async fn scan(app: &App) -> anyhow::Result<()> {
             "INSERT INTO items(kind, parent_id, title, season, path) VALUES ('season', ?, ?, ?, ?)
              ON CONFLICT(path) DO UPDATE SET kind = kind RETURNING id",
         ).bind(show).bind(format!("Saison {s}")).bind(s).bind(format!("{}#s{s}", show_dir.display())).fetch_one(&mut *tx).await?;
-        sqlx::query("INSERT INTO items(kind, parent_id, title, season, episode, path) VALUES ('episode', ?, ?, ?, ?, ?)")
+        sqlx::query("INSERT INTO items(kind, parent_id, title, season, episode, path) VALUES ('episode', ?, ?, ?, ?, ?) ON CONFLICT(path) DO NOTHING")
             .bind(season).bind(format!("Épisode {e}")).bind(s).bind(e).bind(file.to_str()).execute(&mut *tx).await?;
         added += 1;
     }
@@ -124,7 +128,7 @@ async fn scan(app: &App) -> anyhow::Result<()> {
         // ReplayGain présent : pas besoin de mesurer (matched = 1).
         sqlx::query(
             "INSERT INTO items(kind, parent_id, title, artist, season, episode, duration, loudness, peak, album_loudness, album_peak, matched, path)
-             VALUES ('track', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             VALUES ('track', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(path) DO NOTHING",
         )
         .bind(album).bind(&t.title).bind(&t.artist).bind(t.disc).bind(t.track).bind(t.duration)
         .bind(t.rg.0).bind(t.rg.1).bind(t.rg.2).bind(t.rg.3).bind(t.rg.0.is_some()).bind(t.path.to_str())
@@ -138,7 +142,9 @@ async fn scan(app: &App) -> anyhow::Result<()> {
 }
 
 /// (racine, fichier) pour chaque fichier d'une des extensions sous les racines.
+/// Un fichier n'apparaît qu'une fois même si les racines se recoupent (dossier listé deux fois ou inclus dans un autre).
 fn walk(roots: &[PathBuf], exts: &'static [&'static str]) -> Vec<(PathBuf, PathBuf)> {
+    let mut seen = HashSet::new();
     roots
         .iter()
         .flat_map(|root| {
@@ -147,6 +153,7 @@ fn walk(roots: &[PathBuf], exts: &'static [&'static str]) -> Vec<(PathBuf, PathB
                 (e.file_type().is_file() && exts.contains(&ext.as_str())).then(|| (root.clone(), e.into_path()))
             })
         })
+        .filter(|(_, p)| seen.insert(p.clone()))
         .collect()
 }
 
