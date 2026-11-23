@@ -87,6 +87,7 @@ button { font: inherit; cursor: pointer; color: inherit; }
 /* Lecteur */
 .player { position: fixed; inset: 0; background: #000; outline: none; user-select: none; }
 .player video { width: 100%; height: 100%; object-fit: contain; display: block; }
+.player.fill video { object-fit: cover; }
 .player video::cue { background: rgba(0,0,0,.6); font-size: clamp(16px, 2.6vw, 34px); }
 .player .top-bar, .player .controls, .player .center-play, .player .up-next { transition: opacity .3s; }
 .player.idle { cursor: none; }
@@ -206,3 +207,4 @@ main { padding-bottom: 120px; }
 .lib { display: grid; grid-template-columns: 6rem 1fr auto; gap: .8rem; align-items: center; padding: .6rem .8rem; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; }
 .lib code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
 .small { font-size: .85rem; }
+.player .icon.on { color: var(--accent); }
