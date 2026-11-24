@@ -490,7 +490,7 @@ pub fn MusicBar() -> Element {
                         if sleep() > 0 { small { "{SLEEP[sleep()].0}" } }
                     }
                     button { class: if panel() == "eq" || settings.read().eq { "icon on" } else { "icon" }, title: "Égaliseur", onclick: move |_| toggle_panel("eq"), "≋" }
-                    input { class: "volume", r#type: "range", min: "0", max: "1", step: "0.05", value: "{volume}", "aria-label": "Volume",
+                    input { class: "volume", r#type: "range", min: "0", max: "1", step: "0.05", value: "{volume}", "aria-label": "Volume", style: "--pos:{volume() * 100.0:.0}%;--buf:0%",
                         oninput: move |e| {
                             let v: f64 = e.value().parse().unwrap_or(1.0);
                             volume.set(v);

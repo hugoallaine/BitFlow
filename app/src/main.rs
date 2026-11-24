@@ -10,6 +10,8 @@ use player::Play;
 
 const CSS: Asset = asset!("/assets/main.css");
 const HLS: Asset = asset!("/assets/hls.min.js");
+// Inter (SIL OFL 1.1), sous-ensemble latin de @fontsource-variable/inter.
+const INTER: Asset = asset!("/assets/inter.woff2");
 
 fn main() {
     dioxus::launch(App);
@@ -61,6 +63,7 @@ fn App() -> Element {
     use_context_provider(|| Signal::new(music::load_settings()));
     rsx! {
         document::Title { "BitFlow" }
+        document::Style { "@font-face{{font-family:Inter;src:url({INTER}) format('woff2');font-weight:100 900;font-display:swap}}" }
         document::Stylesheet { href: CSS }
         document::Script { src: HLS }
         Router::<Route> {}
@@ -71,6 +74,8 @@ fn App() -> Element {
 fn Shell() -> Element {
     let me = use_resource(|| api::get::<Me>("/api/me"));
     let mut q = use_signal(String::new);
+    // Clé = route : la page est recréée à chaque navigation, ce qui rejoue son animation d'entrée.
+    let route = use_route::<Route>().to_string();
     rsx! {
         header { class: "top",
             Link { class: "logo", to: Route::Home {}, "BitFlow" }
@@ -106,7 +111,9 @@ fn Shell() -> Element {
                 }
             }
         }
-        main { Outlet::<Route> {} }
+        main {
+            div { key: "{route}", class: "page", Outlet::<Route> {} }
+        }
         music::MusicBar {}
     }
 }
