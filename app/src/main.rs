@@ -5,7 +5,7 @@ mod player;
 
 use bitflow_shared::{AuthConfig, Credentials, Item, Me, Prefs, Progress, ScanStatus};
 use dioxus::prelude::*;
-use photos::{PhotoAlbum, PhotoFolders, Photos};
+use photos::{PhotoAlbum, PhotoFolders, PhotoMap, Photos};
 use player::Play;
 
 const CSS: Asset = asset!("/assets/main.css");
@@ -32,6 +32,8 @@ enum Route {
     Photos {},
     #[route("/photos/folders")]
     PhotoFolders {},
+    #[route("/photos/map")]
+    PhotoMap {},
     #[route("/photos/album?:owner&:folder")]
     PhotoAlbum { owner: i64, folder: String },
     #[route("/item/:id")]

@@ -220,7 +220,7 @@ main:has(.ph) { display: block; }
 .ph-video { position: absolute; right: 6px; bottom: 6px; background: rgba(0,0,0,.7); color: #fff; font-size: 12px; padding: 1px 6px; border-radius: 4px; }
 .more { display: block; margin: 1.5rem auto; }
 .thumb.square { aspect-ratio: 1; }
-.viewer { position: fixed; inset: 0; z-index: 50; background: #000; display: grid; place-items: center; outline: none; }
+.viewer { position: fixed; inset: 0; z-index: 2000; background: #000; display: grid; place-items: center; outline: none; }
 .viewer img, .viewer video { max-width: 100vw; max-height: 100vh; object-fit: contain; }
 .viewer-bar { position: absolute; left: 0; right: 0; bottom: 0; display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; padding: 1rem clamp(16px, 4vw, 48px); background: linear-gradient(0deg, rgba(0,0,0,.85), transparent); }
 .viewer-bar > div:last-child { display: flex; gap: .5rem; }
@@ -228,6 +228,12 @@ main:has(.ph) { display: block; }
 .viewer .nav:hover { background: rgba(255,255,255,.15); }
 .viewer .prev { left: 12px; }
 .viewer .next { right: 12px; }
-.dialog-bg { position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,.6); display: grid; place-items: center; padding: 16px; }
+.dialog-bg { position: fixed; inset: 0; z-index: 2100; background: rgba(0,0,0,.6); display: grid; place-items: center; padding: 16px; }
 .dialog { width: min(440px, 100%); margin: 0; }
 .check-row { display: flex; align-items: center; gap: .6rem; padding: .35rem 0; }
+.map { height: calc(100vh - 190px); min-height: 360px; border-radius: var(--radius); overflow: hidden; background: var(--panel); }
+.map-ph { border: 2px solid #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 14px rgba(0,0,0,.5); background: var(--panel); }
+.map-ph img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.map-ph b { position: absolute; top: -8px; right: -8px; min-width: 22px; height: 22px; padding: 0 5px; border-radius: 11px; background: var(--accent); color: #fff; font-size: 12px; display: grid; place-items: center; }
+.map-ph { overflow: visible; }
+.map-ph img { border-radius: 6px; }

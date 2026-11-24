@@ -6,6 +6,26 @@ use crate::{Route, api};
 
 const MONTHS: [&str; 12] = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"];
 const PAGE: usize = 300;
+const LEAFLET_JS: Asset = asset!("/assets/leaflet.js");
+const LEAFLET_CSS: Asset = asset!("/assets/leaflet.css");
+
+/// Carte Leaflet + regroupement des marqueurs ; reçoit [[index, id, lat, lon]…], renvoie l'index cliqué.
+const MAP_JS: &str = r#"
+await new Promise(r => { const t = setInterval(() => { if (window.L && L.markerClusterGroup && document.getElementById('bf-map')) { clearInterval(t); r(); } }, 50); });
+const points = await dioxus.recv();
+const map = L.map('bf-map', { worldCopyJump: true });
+L.tileLayer('/api/tiles/{z}/{x}/{y}', { maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' }).addTo(map);
+const icon = (id, count) => L.divIcon({ className: 'map-ph', iconSize: [56, 56], html: `<img src="/api/photos/${id}/thumb">` + (count ? `<b>${count}</b>` : '') });
+const group = L.markerClusterGroup({ showCoverageOnHover: false, maxClusterRadius: 60,
+  iconCreateFunction: c => icon(c.getAllChildMarkers()[0].options.pid, c.getChildCount()) });
+for (const [i, id, lat, lon] of points) {
+  const m = L.marker([lat, lon], { pid: id, icon: icon(id) });
+  m.on('click', () => dioxus.send(i));
+  group.addLayer(m);
+}
+map.addLayer(group);
+map.fitBounds(group.getBounds(), { maxZoom: 14, padding: [40, 40] });
+"#;
 
 /// (année, mois 1-12, jour) depuis des secondes Unix (algorithme de Howard Hinnant).
 fn civil(ts: i64) -> (i64, usize, i64) {
@@ -34,6 +54,7 @@ fn date_label(ts: i64) -> String {
 pub enum Tab {
     Timeline,
     Folders,
+    Map,
 }
 
 #[component]
@@ -43,6 +64,7 @@ fn Tabs(active: Tab) -> Element {
         div { class: "tabs",
             Link { class: class(Tab::Timeline), to: Route::Photos {}, "Chronologie" }
             Link { class: class(Tab::Folders), to: Route::PhotoFolders {}, "Dossiers" }
+            Link { class: class(Tab::Map), to: Route::PhotoMap {}, "Carte" }
         }
     }
 }
@@ -152,6 +174,42 @@ fn Viewer(photos: Vec<Photo>, index: usize, on_close: EventHandler<()>, on_move:
             if index < last {
                 button { class: "nav next", title: "Suivante", onclick: move |_| on_move.call(index + 1), "›" }
             }
+        }
+    }
+}
+
+/// Photos géolocalisées sur une carte ; un clic ouvre la visionneuse.
+#[component]
+pub fn PhotoMap() -> Element {
+    let photos = use_resource(|| api::get::<Vec<Photo>>("/api/photos?geo=true&limit=20000"));
+    let mut open = use_signal(|| None::<usize>);
+    use_effect(move || {
+        let Some(Ok(list)) = &*photos.read() else { return };
+        if list.is_empty() {
+            return;
+        }
+        let points: Vec<_> = list.iter().enumerate().map(|(i, p)| (i, p.id, p.lat, p.lon)).collect();
+        let mut map = document::eval(MAP_JS);
+        let _ = map.send(points);
+        spawn(async move {
+            while let Ok(i) = map.recv::<usize>().await {
+                open.set(Some(i));
+            }
+        });
+    });
+    rsx! {
+        document::Stylesheet { href: LEAFLET_CSS }
+        document::Script { src: LEAFLET_JS }
+        Tabs { active: Tab::Map }
+        match &*photos.read() {
+            Some(Ok(list)) if list.is_empty() => rsx! { p { class: "muted", "Aucune photo géolocalisée." } },
+            Some(Ok(list)) => rsx! {
+                div { id: "bf-map", class: "map" }
+                if let Some(i) = open() {
+                    Viewer { photos: list.clone(), index: i, on_close: move |_| open.set(None), on_move: move |j| open.set(Some(j)) }
+                }
+            },
+            _ => rsx! {},
         }
     }
 }

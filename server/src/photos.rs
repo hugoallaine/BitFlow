@@ -41,6 +41,7 @@ pub fn routes() -> Router<App> {
         .route("/photos/folders", get(folders))
         .route("/photos/shares", put(set_share))
         .route("/photos/{id}/{size}", get(file))
+        .route("/tiles/{z}/{x}/{y}", get(tile))
 }
 
 // ---------- Analyse ----------
@@ -289,6 +290,9 @@ pub async fn thumbs(app: &App) -> anyhow::Result<()> {
 struct ListQuery {
     owner: Option<i64>,
     folder: Option<String>,
+    /// Seulement les photos géolocalisées (carte).
+    #[serde(default)]
+    geo: bool,
     #[serde(default)]
     offset: i64,
     limit: Option<i64>,
@@ -297,11 +301,11 @@ struct ListQuery {
 async fn list(State(app): State<App>, u: User, Query(q): Query<ListQuery>) -> R<Json<Vec<Photo>>> {
     let sql = format!(
         "SELECT p.id, p.owner, p.folder, p.name, p.video, p.taken, p.lat, p.lon, p.duration FROM photos p
-         WHERE {VISIBLE} AND (?2 IS NULL OR p.owner = ?2) AND (?3 IS NULL OR p.folder = ?3)
+         WHERE {VISIBLE} AND (?2 IS NULL OR p.owner = ?2) AND (?3 IS NULL OR p.folder = ?3) AND (NOT ?6 OR p.lat IS NOT NULL)
          ORDER BY p.taken DESC, p.id DESC LIMIT ?4 OFFSET ?5"
     );
     let photos = sqlx::query_as(&sql)
-        .bind(u.id).bind(q.owner).bind(q.folder).bind(q.limit.unwrap_or(300).clamp(1, 5000)).bind(q.offset.max(0))
+        .bind(u.id).bind(q.owner).bind(q.folder).bind(q.limit.unwrap_or(300).clamp(1, 20000)).bind(q.offset.max(0)).bind(q.geo)
         .fetch_all(&app.db)
         .await?;
     Ok(Json(photos))
@@ -367,6 +371,30 @@ async fn file(State(app): State<App>, u: User, Path((id, size)): Path<(i64, Stri
     }
     let mut res = ServeFile::new(out).oneshot(req).await?.into_response();
     res.headers_mut().insert(header::CACHE_CONTROL, header::HeaderValue::from_static("private, max-age=86400"));
+    Ok(res)
+}
+
+/// Tuile OpenStreetMap relayée et gardée dans /data/tiles : le navigateur ne contacte que BitFlow.
+/// shortcut: tuiles jamais rafraîchies, à expirer (~30 jours) si les cartes doivent suivre les changements d'OSM.
+async fn tile(State(app): State<App>, _u: User, Path((z, x, y)): Path<(u32, u32, u32)>, req: Request) -> R<Response> {
+    if z > 19 || x >= 1 << z || y >= 1 << z {
+        return err(StatusCode::NOT_FOUND, "tuile hors limites");
+    }
+    let out = app.cfg.data.join("tiles").join(z.to_string()).join(x.to_string()).join(format!("{y}.png"));
+    if !out.exists() {
+        // Politique d'utilisation OSM : User-Agent identifiable (client `app.http`) et cache local.
+        let res = app.http.get(format!("https://tile.openstreetmap.org/{z}/{x}/{y}.png")).send().await?;
+        if !res.status().is_success() {
+            return err(StatusCode::BAD_GATEWAY, "tuile indisponible");
+        }
+        let bytes = res.bytes().await?;
+        tokio::fs::create_dir_all(out.parent().unwrap()).await?;
+        let tmp = out.with_extension("tmp");
+        tokio::fs::write(&tmp, &bytes).await?;
+        tokio::fs::rename(&tmp, &out).await?;
+    }
+    let mut res = ServeFile::new(out).oneshot(req).await?.into_response();
+    res.headers_mut().insert(header::CACHE_CONTROL, header::HeaderValue::from_static("private, max-age=604800"));
     Ok(res)
 }
 
