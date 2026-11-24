@@ -1,9 +1,11 @@
 mod api;
 mod music;
+mod photos;
 mod player;
 
 use bitflow_shared::{AuthConfig, Credentials, Item, Me, Prefs, Progress, ScanStatus};
 use dioxus::prelude::*;
+use photos::{PhotoAlbum, PhotoFolders, Photos};
 use player::Play;
 
 const CSS: Asset = asset!("/assets/main.css");
@@ -26,6 +28,12 @@ enum Route {
     Music {},
     #[route("/artists")]
     Artists {},
+    #[route("/photos")]
+    Photos {},
+    #[route("/photos/folders")]
+    PhotoFolders {},
+    #[route("/photos/album?:owner&:folder")]
+    PhotoAlbum { owner: i64, folder: String },
     #[route("/item/:id")]
     Detail { id: i64 },
     #[route("/search/:q")]
@@ -64,6 +72,7 @@ fn Shell() -> Element {
                 Link { to: Route::Movies {}, "Films" }
                 Link { to: Route::Shows {}, "Séries" }
                 Link { to: Route::Music {}, "Musiques" }
+                Link { to: Route::Photos {}, "Photos" }
             }
             form {
                 class: "search",

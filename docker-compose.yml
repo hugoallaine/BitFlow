@@ -10,6 +10,7 @@ services:
       BITFLOW_MOVIES: /media/films
       BITFLOW_SHOWS: /media/series
       BITFLOW_MUSIC: /media/musique
+      BITFLOW_PHOTOS: /media/photos # un sous-dossier par utilisateur : /media/photos/<nom du compte>
       # BITFLOW_CONTACT: https://media.example.ch # contact pour MusicBrainz
       BITFLOW_LANG: fr-FR
       TMDB_TOKEN: ${TMDB_TOKEN:-}
@@ -25,6 +26,7 @@ services:
       - /chemin/vers/films:/media/films:ro
       - /chemin/vers/series:/media/series:ro
       - /chemin/vers/musique:/media/musique:ro
+      - /chemin/vers/photos:/media/photos:ro
     # Accélération matérielle VAAPI (Intel/AMD) :
     # devices:
     #   - /dev/dri:/dev/dri

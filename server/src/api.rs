@@ -19,8 +19,9 @@ pub fn routes() -> Router<App> {
         .route("/auth/oidc/callback", get(auth::oidc_callback))
         .route("/me", get(me))
         .route("/prefs", get(get_prefs).put(put_prefs))
-        .route("/users", post(create_user))
+        .route("/users", get(crate::photos::users).post(create_user))
         .route("/scan", get(scan_status).post(rescan))
+        .merge(crate::photos::routes())
         .route("/items", get(list))
         .route("/resume", get(resume))
         .route("/search", get(search))
@@ -55,7 +56,7 @@ async fn login(State(app): State<App>, Json(c): Json<Credentials>) -> R<impl Int
 
 async fn me(State(app): State<App>, u: User) -> R<Json<Me>> {
     let name = sqlx::query_scalar("SELECT name FROM users WHERE id = ?").bind(u.id).fetch_one(&app.db).await?;
-    Ok(Json(Me { name, admin: u.admin }))
+    Ok(Json(Me { id: u.id, name, admin: u.admin }))
 }
 
 /// Préférences enregistrées, sinon valeurs par défaut (sous-titres dans la langue du serveur si l'audio diffère).
@@ -119,13 +120,19 @@ async fn scan_status(State(app): State<App>, _u: User) -> R<Json<ScanStatus>> {
         ("Films", "BITFLOW_MOVIES", &app.cfg.movies, "movie"),
         ("Séries", "BITFLOW_SHOWS", &app.cfg.shows, "episode"),
         ("Musiques", "BITFLOW_MUSIC", &app.cfg.music, "track"),
+        ("Photos", "BITFLOW_PHOTOS", &app.cfg.photos, "photo"),
     ] {
         if roots.is_empty() {
             libraries.push(Library { kind: kind.into(), path: String::new(), files: 0, error: Some(format!("non configuré ({var})")) });
         }
         for root in roots {
             let path = root.to_string_lossy().into_owned();
-            let files = sqlx::query_scalar("SELECT COUNT(*) FROM items WHERE kind = ?1 AND substr(path, 1, length(?2)) = ?2")
+            let sql = if item == "photo" {
+                "SELECT COUNT(*) FROM photos WHERE ?1 = 'photo' AND substr(path, 1, length(?2)) = ?2"
+            } else {
+                "SELECT COUNT(*) FROM items WHERE kind = ?1 AND substr(path, 1, length(?2)) = ?2"
+            };
+            let files = sqlx::query_scalar(sql)
                 .bind(item).bind(&path).fetch_one(&app.db).await?;
             libraries.push(Library { kind: kind.into(), error: scan::root_error(root), path, files });
         }

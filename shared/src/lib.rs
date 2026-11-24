@@ -74,6 +74,7 @@ pub struct Prefs {
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 pub struct Me {
+    pub id: i64,
     pub name: String,
     pub admin: bool,
 }
@@ -112,4 +113,46 @@ pub struct Library {
 pub struct ScanStatus {
     pub running: bool,
     pub libraries: Vec<Library>,
+}
+
+/// Photo ou vidéo personnelle. `taken` : date de prise de vue (EXIF), sinon date du fichier, en secondes Unix.
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[cfg_attr(feature = "sqlx", derive(sqlx::FromRow))]
+pub struct Photo {
+    pub id: i64,
+    pub owner: i64,
+    /// Dossier relatif au dossier de l'utilisateur ("" = racine).
+    pub folder: String,
+    pub name: String,
+    pub video: bool,
+    pub taken: i64,
+    pub lat: Option<f64>,
+    pub lon: Option<f64>,
+    pub duration: Option<f64>,
+}
+
+/// Dossier de photos visible : à soi (avec ses partages) ou partagé par un autre utilisateur.
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+pub struct PhotoFolder {
+    pub owner: i64,
+    pub owner_name: String,
+    pub folder: String,
+    pub count: i64,
+    pub cover: i64,
+    /// Utilisateurs avec qui le dossier est partagé (dossiers à soi uniquement).
+    pub shared_with: Vec<i64>,
+}
+
+/// Partage d'un dossier (et de ses sous-dossiers) ; liste vide = plus partagé.
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+pub struct Share {
+    pub folder: String,
+    pub users: Vec<i64>,
+}
+
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[cfg_attr(feature = "sqlx", derive(sqlx::FromRow))]
+pub struct UserName {
+    pub id: i64,
+    pub name: String,
 }

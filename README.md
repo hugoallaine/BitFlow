@@ -42,6 +42,7 @@ series/  Breaking Bad/Saison 1/Breaking.Bad.S01E02.mkv   (ou 1x02)
 | `BITFLOW_URL` | `http://localhost:8080` | URL publique. En `https://`, le cookie devient `__Host-` + `Secure`. Sert aussi à l'URL de retour OIDC. |
 | `BITFLOW_MOVIES` / `BITFLOW_SHOWS` | – | Dossiers des médias, séparés par des virgules. |
 | `BITFLOW_MUSIC` | – | Dossiers de musique, séparés par des virgules. |
+| `BITFLOW_PHOTOS` | – | Dossiers de photos : un sous-dossier par utilisateur, du nom de son compte (`/media/photos/alice/…`). Partage par dossier depuis l'onglet Photos. |
 | `BITFLOW_CONTACT` | – | Contact ajouté au User-Agent MusicBrainz (URL ou e-mail), recommandé par leurs règles. |
 | `FANART_KEY` | – | Clé personnelle Fanart.tv (gratuite) pour les images d'artistes. |
 | `TMDB_TOKEN` | – | Jeton TMDB v4. Sans lui, pas de métadonnées. |
@@ -67,7 +68,7 @@ cd app && dx bundle --web --release --out-dir ../target/web-out   # puis BITFLOW
 
 1. **Phase 1 (livrée)** : films, séries, TMDB, authentification, lecteur web, Docker.
 2. **Phase 2 (livrée)** : musique (MusicBrainz + Cover Art Archive, tags, file de lecture).
-3. **Phase 3** : photos (EXIF, miniatures, chronologie).
+3. **Phase 3 (en cours)** : photos par utilisateur et partage (livré), carte, reconnaissance des visages.
 4. **Phase 4** : applications Android et iOS (Dioxus mobile, jeton Bearer, OIDC par navigateur système, téléchargement hors ligne).
 
 Métadonnées fournies par TMDB. Ce produit utilise l'API TMDB mais n'est ni approuvé ni certifié par TMDB.

@@ -40,6 +40,9 @@ pub async fn run(app: &App) {
     if let Err(e) = scan(app).await {
         tracing::error!("scan : {e:#}");
     }
+    if let Err(e) = crate::photos::scan(app).await {
+        tracing::error!("photos : {e:#}");
+    }
     if let Err(e) = crate::tmdb::enrich(app).await {
         tracing::error!("TMDB : {e:#}");
     }
@@ -48,6 +51,9 @@ pub async fn run(app: &App) {
     }
     if let Err(e) = crate::loudness::analyze(app).await {
         tracing::error!("analyse du volume : {e:#}");
+    }
+    if let Err(e) = crate::photos::thumbs(app).await {
+        tracing::error!("miniatures : {e:#}");
     }
     RUNNING.store(false, Ordering::SeqCst);
 }

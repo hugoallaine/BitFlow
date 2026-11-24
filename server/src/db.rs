@@ -27,6 +27,17 @@ CREATE TABLE IF NOT EXISTS progress(
   item_id INTEGER NOT NULL REFERENCES items ON DELETE CASCADE,
   position REAL NOT NULL, watched INTEGER NOT NULL DEFAULT 0,
   updated INTEGER NOT NULL DEFAULT (unixepoch()), PRIMARY KEY(user_id, item_id));
+-- Photos : thumb 0 = miniature à faire, 1 = faite, 2 = échec.
+CREATE TABLE IF NOT EXISTS photos(
+  id INTEGER PRIMARY KEY, owner INTEGER NOT NULL REFERENCES users ON DELETE CASCADE,
+  path TEXT NOT NULL UNIQUE, folder TEXT NOT NULL, name TEXT NOT NULL, video INTEGER NOT NULL,
+  taken INTEGER NOT NULL, lat REAL, lon REAL, duration REAL, mtime INTEGER NOT NULL,
+  thumb INTEGER NOT NULL DEFAULT 0);
+CREATE INDEX IF NOT EXISTS photos_owner ON photos(owner, taken DESC);
+-- Dossier partagé par owner avec target, sous-dossiers compris ('' = toutes ses photos).
+CREATE TABLE IF NOT EXISTS photo_shares(
+  owner INTEGER NOT NULL REFERENCES users ON DELETE CASCADE, folder TEXT NOT NULL,
+  target INTEGER NOT NULL REFERENCES users ON DELETE CASCADE, PRIMARY KEY(owner, folder, target));
 ";
 
 /// Colonnes de `bitflow_shared::Item`, progression de l'utilisateur `?1` incluse.

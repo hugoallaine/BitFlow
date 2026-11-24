@@ -3,6 +3,7 @@ mod auth;
 mod db;
 mod loudness;
 mod musicbrainz;
+mod photos;
 mod scan;
 mod stream;
 mod tmdb;
@@ -26,6 +27,8 @@ pub struct Config {
     pub movies: Vec<PathBuf>,
     pub shows: Vec<PathBuf>,
     pub music: Vec<PathBuf>,
+    /// Un sous-dossier par utilisateur, du même nom que son compte.
+    pub photos: Vec<PathBuf>,
     /// Contact ajouté au User-Agent MusicBrainz (URL ou e-mail de l'administrateur), recommandé par leurs règles.
     pub contact: Option<String>,
     /// Clé personnelle Fanart.tv (gratuite) : images d'artistes.
@@ -49,6 +52,7 @@ impl Config {
             movies: dirs("BITFLOW_MOVIES"),
             shows: dirs("BITFLOW_SHOWS"),
             music: dirs("BITFLOW_MUSIC"),
+            photos: dirs("BITFLOW_PHOTOS"),
             contact: var("BITFLOW_CONTACT"),
             fanart_key: var("FANART_KEY"),
             url: var("BITFLOW_URL").unwrap_or("http://localhost:8080".into()).trim_end_matches('/').into(),
@@ -92,6 +96,8 @@ pub struct App {
     pub downloads: Arc<Mutex<HashMap<String, f64>>>,
     /// Une seule conversion à la fois : elles sont lourdes et ne doivent pas étouffer le streaming.
     pub download_slot: Arc<tokio::sync::Semaphore>,
+    /// Miniatures générées à la demande : 2 à la fois.
+    pub photo_slot: Arc<tokio::sync::Semaphore>,
 }
 
 /// Erreur HTTP : code + message. Toute erreur anyhow devient un 500 journalisé.
@@ -140,6 +146,7 @@ async fn main() -> anyhow::Result<()> {
         oidc_pending: Default::default(),
         downloads: Default::default(),
         download_slot: Arc::new(tokio::sync::Semaphore::new(1)),
+        photo_slot: Arc::new(tokio::sync::Semaphore::new(2)),
     };
 
     let bg = app.clone();
