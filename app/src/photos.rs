@@ -226,7 +226,7 @@ pub fn PhotoPeople() -> Element {
             Some(Ok(p)) if !p.enabled => rsx! {
                 p { class: "muted",
                     "La reconnaissance des visages est désactivée. Pour l'activer, ajoutez BITFLOW_FACES=1 au serveur. "
-                    "L'analyse se fait entièrement sur votre serveur, mais les empreintes de visages sont des données biométriques (nLPD) : "
+                    "L'analyse se fait entièrement sur votre serveur, mais les empreintes de visages sont des données biométriques sensibles : "
                     "prévenez les personnes concernées."
                 }
             },

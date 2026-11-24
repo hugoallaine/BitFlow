@@ -1,6 +1,6 @@
 //! Visages : détection YuNet (MIT) et empreinte SFace (Apache 2.0), modèles OpenCV Zoo exécutés en Rust pur (tract).
 //! Regroupement par utilisateur : un visage rejoint la personne dont l'empreinte moyenne est la plus proche.
-//! Données biométriques (nLPD art. 5) : désactivé par défaut, BITFLOW_FACES=1 pour l'activer ; tout reste sur le serveur.
+//! Données biométriques sensibles : désactivé par défaut, BITFLOW_FACES=1 pour l'activer ; tout reste sur le serveur.
 use std::{
     collections::HashMap,
     path::Path,
