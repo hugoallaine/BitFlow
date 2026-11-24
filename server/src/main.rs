@@ -1,6 +1,7 @@
 mod api;
 mod auth;
 mod db;
+mod faces;
 mod loudness;
 mod musicbrainz;
 mod photos;
@@ -29,6 +30,10 @@ pub struct Config {
     pub music: Vec<PathBuf>,
     /// Un sous-dossier par utilisateur, du même nom que son compte.
     pub photos: Vec<PathBuf>,
+    /// Reconnaissance des visages (données biométriques) : désactivée par défaut.
+    pub faces: bool,
+    /// Dossier des modèles ONNX (yunet.onnx, sface.onnx).
+    pub models: PathBuf,
     /// Contact ajouté au User-Agent MusicBrainz (URL ou e-mail de l'administrateur), recommandé par leurs règles.
     pub contact: Option<String>,
     /// Clé personnelle Fanart.tv (gratuite) : images d'artistes.
@@ -53,6 +58,8 @@ impl Config {
             shows: dirs("BITFLOW_SHOWS"),
             music: dirs("BITFLOW_MUSIC"),
             photos: dirs("BITFLOW_PHOTOS"),
+            faces: var("BITFLOW_FACES").is_some_and(|v| v == "1" || v == "true"),
+            models: var("BITFLOW_MODELS").unwrap_or("./models".into()).into(),
             contact: var("BITFLOW_CONTACT"),
             fanart_key: var("FANART_KEY"),
             url: var("BITFLOW_URL").unwrap_or("http://localhost:8080".into()).trim_end_matches('/').into(),

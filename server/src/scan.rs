@@ -55,6 +55,9 @@ pub async fn run(app: &App) {
     if let Err(e) = crate::photos::thumbs(app).await {
         tracing::error!("miniatures : {e:#}");
     }
+    if let Err(e) = crate::faces::run(app).await {
+        tracing::error!("visages : {e:#}");
+    }
     RUNNING.store(false, Ordering::SeqCst);
 }
 

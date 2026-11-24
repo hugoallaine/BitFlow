@@ -32,12 +32,21 @@ CREATE TABLE IF NOT EXISTS photos(
   id INTEGER PRIMARY KEY, owner INTEGER NOT NULL REFERENCES users ON DELETE CASCADE,
   path TEXT NOT NULL UNIQUE, folder TEXT NOT NULL, name TEXT NOT NULL, video INTEGER NOT NULL,
   taken INTEGER NOT NULL, lat REAL, lon REAL, duration REAL, mtime INTEGER NOT NULL,
-  thumb INTEGER NOT NULL DEFAULT 0);
+  thumb INTEGER NOT NULL DEFAULT 0, faces INTEGER NOT NULL DEFAULT 0);
 CREATE INDEX IF NOT EXISTS photos_owner ON photos(owner, taken DESC);
 -- Dossier partagé par owner avec target, sous-dossiers compris ('' = toutes ses photos).
 CREATE TABLE IF NOT EXISTS photo_shares(
   owner INTEGER NOT NULL REFERENCES users ON DELETE CASCADE, folder TEXT NOT NULL,
   target INTEGER NOT NULL REFERENCES users ON DELETE CASCADE, PRIMARY KEY(owner, folder, target));
+-- Personnes reconnues dans les photos d'un utilisateur ; visages en coordonnées relatives (0-1) de l'image.
+CREATE TABLE IF NOT EXISTS people(
+  id INTEGER PRIMARY KEY, owner INTEGER NOT NULL REFERENCES users ON DELETE CASCADE, name TEXT);
+CREATE TABLE IF NOT EXISTS faces(
+  id INTEGER PRIMARY KEY, photo_id INTEGER NOT NULL REFERENCES photos ON DELETE CASCADE,
+  person_id INTEGER REFERENCES people ON DELETE SET NULL,
+  x REAL NOT NULL, y REAL NOT NULL, w REAL NOT NULL, h REAL NOT NULL, score REAL NOT NULL, embedding BLOB NOT NULL);
+CREATE INDEX IF NOT EXISTS faces_person ON faces(person_id);
+CREATE INDEX IF NOT EXISTS faces_photo ON faces(photo_id);
 ";
 
 /// Colonnes de `bitflow_shared::Item`, progression de l'utilisateur `?1` incluse.
@@ -69,6 +78,7 @@ pub async fn open(file: &Path) -> anyhow::Result<SqlitePool> {
         "ALTER TABLE items ADD COLUMN peak REAL",
         "ALTER TABLE items ADD COLUMN album_loudness REAL",
         "ALTER TABLE items ADD COLUMN album_peak REAL",
+        "ALTER TABLE photos ADD COLUMN faces INTEGER NOT NULL DEFAULT 0",
     ] {
         if let Err(e) = sqlx::query(m).execute(&pool).await
             && !e.to_string().contains("duplicate column")

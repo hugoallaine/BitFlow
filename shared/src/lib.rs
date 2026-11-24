@@ -156,3 +156,22 @@ pub struct UserName {
     pub id: i64,
     pub name: String,
 }
+
+/// Personne reconnue dans ses photos ; `face` = visage servant de vignette.
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[cfg_attr(feature = "sqlx", derive(sqlx::FromRow))]
+pub struct Person {
+    pub id: i64,
+    pub name: Option<String>,
+    pub count: i64,
+    pub face: i64,
+}
+
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+pub struct People {
+    /// BITFLOW_FACES activé sur le serveur.
+    pub enabled: bool,
+    /// Photos restant à analyser.
+    pub pending: i64,
+    pub people: Vec<Person>,
+}

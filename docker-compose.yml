@@ -11,6 +11,7 @@ services:
       BITFLOW_SHOWS: /media/series
       BITFLOW_MUSIC: /media/musique
       BITFLOW_PHOTOS: /media/photos # un sous-dossier par utilisateur : /media/photos/<nom du compte>
+      # BITFLOW_FACES: 1 # reconnaissance des visages (données biométriques, analyse locale)
       # BITFLOW_CONTACT: https://media.example.ch # contact pour MusicBrainz
       BITFLOW_LANG: fr-FR
       TMDB_TOKEN: ${TMDB_TOKEN:-}

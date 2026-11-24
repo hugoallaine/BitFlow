@@ -237,3 +237,9 @@ main:has(.ph) { display: block; }
 .map-ph b { position: absolute; top: -8px; right: -8px; min-width: 22px; height: 22px; padding: 0 5px; border-radius: 11px; background: var(--accent); color: #fff; font-size: 12px; display: grid; place-items: center; }
 .map-ph { overflow: visible; }
 .map-ph img { border-radius: 6px; }
+.people { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 1.4rem 1rem; margin-top: 1rem; }
+.person { display: grid; justify-items: center; gap: .3rem; text-align: center; }
+.person img { width: 120px; height: 120px; border-radius: 50%; object-fit: cover; background: var(--panel); transition: transform .18s; }
+.person:hover img { transform: scale(1.05); }
+.person-name { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; margin-bottom: .3rem; }
+.person-name input { width: min(320px, 100%); }

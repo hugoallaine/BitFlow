@@ -14,7 +14,7 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, put},
 };
-use bitflow_shared::{Photo, PhotoFolder, Share, UserName};
+use bitflow_shared::{People, Photo, PhotoFolder, Share, UserName};
 use futures_util::{StreamExt, stream};
 use regex::Regex;
 use serde::Deserialize;
@@ -42,6 +42,9 @@ pub fn routes() -> Router<App> {
         .route("/photos/shares", put(set_share))
         .route("/photos/{id}/{size}", get(file))
         .route("/tiles/{z}/{x}/{y}", get(tile))
+        .route("/people", get(people))
+        .route("/people/{id}", put(rename))
+        .route("/faces/{id}/thumb", get(face_thumb))
 }
 
 // ---------- Analyse ----------
@@ -88,7 +91,7 @@ pub async fn scan(app: &App) -> anyhow::Result<()> {
         let id: i64 = sqlx::query_scalar(
             "INSERT INTO photos(owner, path, folder, name, video, taken, lat, lon, duration, mtime) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(path) DO UPDATE SET owner = excluded.owner, folder = excluded.folder, name = excluded.name, taken = excluded.taken,
-             lat = excluded.lat, lon = excluded.lon, duration = excluded.duration, mtime = excluded.mtime, thumb = 0 RETURNING id",
+             lat = excluded.lat, lon = excluded.lon, duration = excluded.duration, mtime = excluded.mtime, thumb = 0, faces = 0 RETURNING id",
         )
         .bind(f.owner).bind(&f.path).bind(&f.folder).bind(&f.name).bind(f.video)
         .bind(m.taken.unwrap_or(f.mtime)).bind(m.lat).bind(m.lon).bind(m.duration).bind(f.mtime)
@@ -226,7 +229,7 @@ fn cache(app: &App, size: &str, id: i64) -> PathBuf {
 }
 
 fn remove_cache(app: &App, id: i64) {
-    for size in ["thumb", "preview"] {
+    for size in ["thumb", "preview", "face"] {
         let _ = std::fs::remove_file(cache(app, size, id));
     }
 }
@@ -266,6 +269,18 @@ async fn render(path: &str, video: bool, max: u32, out: &FsPath) -> anyhow::Resu
     Ok(())
 }
 
+/// Aperçu 2048 px (créé au besoin) : affiché par la visionneuse et analysé pour les visages.
+pub async fn preview(app: &App, id: i64, path: &str) -> anyhow::Result<PathBuf> {
+    let out = cache(app, "preview", id);
+    if !out.exists() {
+        let _slot = app.photo_slot.acquire().await?;
+        if !out.exists() {
+            render(path, false, PREVIEW, &out).await?;
+        }
+    }
+    Ok(out)
+}
+
 /// Miniatures manquantes, 2 à la fois (ImageMagick est gourmand), après chaque analyse.
 pub async fn thumbs(app: &App) -> anyhow::Result<()> {
     let todo: Vec<(i64, String, bool)> = sqlx::query_as("SELECT id, path, video FROM photos WHERE thumb = 0").fetch_all(&app.db).await?;
@@ -293,6 +308,8 @@ struct ListQuery {
     /// Seulement les photos géolocalisées (carte).
     #[serde(default)]
     geo: bool,
+    /// Photos où apparaît cette personne.
+    person: Option<i64>,
     #[serde(default)]
     offset: i64,
     limit: Option<i64>,
@@ -302,10 +319,11 @@ async fn list(State(app): State<App>, u: User, Query(q): Query<ListQuery>) -> R<
     let sql = format!(
         "SELECT p.id, p.owner, p.folder, p.name, p.video, p.taken, p.lat, p.lon, p.duration FROM photos p
          WHERE {VISIBLE} AND (?2 IS NULL OR p.owner = ?2) AND (?3 IS NULL OR p.folder = ?3) AND (NOT ?6 OR p.lat IS NOT NULL)
+           AND (?7 IS NULL OR EXISTS (SELECT 1 FROM faces f WHERE f.photo_id = p.id AND f.person_id = ?7))
          ORDER BY p.taken DESC, p.id DESC LIMIT ?4 OFFSET ?5"
     );
     let photos = sqlx::query_as(&sql)
-        .bind(u.id).bind(q.owner).bind(q.folder).bind(q.limit.unwrap_or(300).clamp(1, 20000)).bind(q.offset.max(0)).bind(q.geo)
+        .bind(u.id).bind(q.owner).bind(q.folder).bind(q.limit.unwrap_or(300).clamp(1, 20000)).bind(q.offset.max(0)).bind(q.geo).bind(q.person)
         .fetch_all(&app.db)
         .await?;
     Ok(Json(photos))
@@ -359,7 +377,13 @@ async fn file(State(app): State<App>, u: User, Path((id, size)): Path<(i64, Stri
     let (out, max) = match size.as_str() {
         "original" => return Ok(ServeFile::new(path).oneshot(req).await?.into_response()),
         "thumb" => (cache(&app, "thumb", id), THUMB),
-        "preview" if !video => (cache(&app, "preview", id), PREVIEW),
+        "preview" if !video => match preview(&app, id, &path).await {
+            Ok(out) => (out, PREVIEW),
+            Err(e) => {
+                tracing::warn!("aperçu {path} : {e:#}");
+                return err(StatusCode::UNPROCESSABLE_ENTITY, "format non pris en charge");
+            }
+        },
         _ => return err(StatusCode::NOT_FOUND, "taille inconnue"),
     };
     if !out.exists() {
@@ -368,6 +392,70 @@ async fn file(State(app): State<App>, u: User, Path((id, size)): Path<(i64, Stri
             tracing::warn!("{size} {path} : {e:#}");
             return err(StatusCode::UNPROCESSABLE_ENTITY, "format non pris en charge");
         }
+    }
+    let mut res = ServeFile::new(out).oneshot(req).await?.into_response();
+    res.headers_mut().insert(header::CACHE_CONTROL, header::HeaderValue::from_static("private, max-age=86400"));
+    Ok(res)
+}
+
+/// Ses personnes : nommées, ou vues au moins deux fois (les inconnus croisés une fois encombreraient la liste).
+async fn people(State(app): State<App>, u: User) -> R<Json<People>> {
+    let people = sqlx::query_as(
+        "SELECT pe.id, pe.name, COUNT(*) AS count, MAX(f.id) AS face FROM people pe JOIN faces f ON f.person_id = pe.id
+         WHERE pe.owner = ? GROUP BY pe.id HAVING pe.name IS NOT NULL OR COUNT(*) >= 2 ORDER BY pe.name IS NULL, count DESC",
+    )
+    .bind(u.id)
+    .fetch_all(&app.db)
+    .await?;
+    let pending = sqlx::query_scalar("SELECT COUNT(*) FROM photos WHERE owner = ? AND faces = 0 AND video = 0").bind(u.id).fetch_one(&app.db).await?;
+    Ok(Json(People { enabled: app.cfg.faces, pending, people }))
+}
+
+/// Nommer une personne. Même nom qu'une autre de ses personnes : les deux sont fusionnées. Renvoie l'id restant.
+async fn rename(State(app): State<App>, u: User, Path(id): Path<i64>, Json(name): Json<String>) -> R<Json<i64>> {
+    let name = name.trim();
+    let mut tx = app.db.begin().await?;
+    let owned: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM people WHERE id = ? AND owner = ?)").bind(id).bind(u.id).fetch_one(&mut *tx).await?;
+    if !owned {
+        return err(StatusCode::NOT_FOUND, "personne introuvable");
+    }
+    let same: Option<i64> = sqlx::query_scalar("SELECT id FROM people WHERE owner = ? AND id <> ? AND name = ? COLLATE NOCASE")
+        .bind(u.id).bind(id).bind(name).fetch_optional(&mut *tx).await?;
+    let kept = match same {
+        Some(other) if !name.is_empty() => {
+            sqlx::query("UPDATE faces SET person_id = ? WHERE person_id = ?").bind(other).bind(id).execute(&mut *tx).await?;
+            sqlx::query("DELETE FROM people WHERE id = ?").bind(id).execute(&mut *tx).await?;
+            other
+        }
+        _ => {
+            sqlx::query("UPDATE people SET name = NULLIF(?, '') WHERE id = ?").bind(name).bind(id).execute(&mut *tx).await?;
+            id
+        }
+    };
+    tx.commit().await?;
+    Ok(Json(kept))
+}
+
+/// Vignette d'un visage, découpée dans l'aperçu de la photo (propriétaire seulement).
+async fn face_thumb(State(app): State<App>, u: User, Path(id): Path<i64>, req: Request) -> R<Response> {
+    let row: Option<(i64, String, f32, f32, f32, f32)> = sqlx::query_as(
+        "SELECT p.id, p.path, f.x, f.y, f.w, f.h FROM faces f JOIN photos p ON p.id = f.photo_id WHERE f.id = ? AND p.owner = ?",
+    )
+    .bind(id)
+    .bind(u.id)
+    .fetch_optional(&app.db)
+    .await?;
+    let Some((photo, path, x, y, w, h)) = row else { return err(StatusCode::NOT_FOUND, "visage introuvable") };
+    let out = cache(&app, "face", id);
+    if !out.exists() {
+        let src = preview(&app, photo, &path).await?;
+        let dst = out.clone();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+            std::fs::create_dir_all(dst.parent().unwrap())?;
+            crate::faces::crop(&src, x, y, w, h)?.save_with_format(&dst, image::ImageFormat::Jpeg)?;
+            Ok(())
+        })
+        .await??;
     }
     let mut res = ServeFile::new(out).oneshot(req).await?.into_response();
     res.headers_mut().insert(header::CACHE_CONTROL, header::HeaderValue::from_static("private, max-age=86400"));

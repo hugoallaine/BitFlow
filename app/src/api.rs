@@ -54,7 +54,7 @@ pub async fn post<T: DeserializeOwned>(path: &str, body: &impl Serialize) -> Res
     parse(path, reqwest::Client::new().post(format!("{}{path}", origin())).json(body).send().await).await
 }
 
-pub async fn put(path: &str, body: &impl Serialize) -> Result<(), String> {
+pub async fn put<T: DeserializeOwned>(path: &str, body: &impl Serialize) -> Result<T, String> {
     parse(path, reqwest::Client::new().put(format!("{}{path}", origin())).json(body).send().await).await
 }
 

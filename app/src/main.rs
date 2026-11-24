@@ -5,7 +5,7 @@ mod player;
 
 use bitflow_shared::{AuthConfig, Credentials, Item, Me, Prefs, Progress, ScanStatus};
 use dioxus::prelude::*;
-use photos::{PhotoAlbum, PhotoFolders, PhotoMap, Photos};
+use photos::{PhotoAlbum, PhotoFolders, PhotoMap, PhotoPeople, PhotoPerson, Photos};
 use player::Play;
 
 const CSS: Asset = asset!("/assets/main.css");
@@ -34,6 +34,10 @@ enum Route {
     PhotoFolders {},
     #[route("/photos/map")]
     PhotoMap {},
+    #[route("/photos/people")]
+    PhotoPeople {},
+    #[route("/photos/people/:id")]
+    PhotoPerson { id: i64 },
     #[route("/photos/album?:owner&:folder")]
     PhotoAlbum { owner: i64, folder: String },
     #[route("/item/:id")]
@@ -429,7 +433,7 @@ fn PlaybackPrefs() -> Element {
     let Some(Ok(p)) = prefs.read_unchecked().clone() else { return rsx! { div { class: "loading" } } };
     // Rechargement après enregistrement : chaque liste repart des valeurs à jour.
     let save = move |p: Prefs| async move {
-        match api::put("/api/prefs", &p).await {
+        match api::put::<()>("/api/prefs", &p).await {
             Ok(()) => {
                 msg.set("Enregistré.".into());
                 prefs.restart();

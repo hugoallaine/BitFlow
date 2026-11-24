@@ -1,5 +1,5 @@
 //! Photos : chronologie par mois, dossiers (avec partage) et visionneuse plein écran.
-use bitflow_shared::{Me, Photo, PhotoFolder, Share, UserName};
+use bitflow_shared::{Me, People, Photo, PhotoFolder, Share, UserName};
 use dioxus::prelude::*;
 
 use crate::{Route, api};
@@ -55,6 +55,7 @@ pub enum Tab {
     Timeline,
     Folders,
     Map,
+    People,
 }
 
 #[component]
@@ -65,6 +66,7 @@ fn Tabs(active: Tab) -> Element {
             Link { class: class(Tab::Timeline), to: Route::Photos {}, "Chronologie" }
             Link { class: class(Tab::Folders), to: Route::PhotoFolders {}, "Dossiers" }
             Link { class: class(Tab::Map), to: Route::PhotoMap {}, "Carte" }
+            Link { class: class(Tab::People), to: Route::PhotoPeople {}, "Personnes" }
         }
     }
 }
@@ -214,6 +216,75 @@ pub fn PhotoMap() -> Element {
     }
 }
 
+/// Personnes reconnues dans ses photos.
+#[component]
+pub fn PhotoPeople() -> Element {
+    let people = use_resource(|| api::get::<People>("/api/people"));
+    rsx! {
+        Tabs { active: Tab::People }
+        match &*people.read() {
+            Some(Ok(p)) if !p.enabled => rsx! {
+                p { class: "muted",
+                    "La reconnaissance des visages est désactivée. Pour l'activer, ajoutez BITFLOW_FACES=1 au serveur. "
+                    "L'analyse se fait entièrement sur votre serveur, mais les empreintes de visages sont des données biométriques (nLPD) : "
+                    "prévenez les personnes concernées."
+                }
+            },
+            Some(Ok(p)) => rsx! {
+                if p.pending > 0 {
+                    p { class: "muted", "Analyse en cours : {p.pending} photos restantes." }
+                }
+                if p.people.is_empty() {
+                    p { class: "muted", "Aucune personne reconnue pour l'instant." }
+                }
+                div { class: "people",
+                    for person in p.people.iter().cloned() {
+                        Link { key: "{person.id}", class: "person", to: Route::PhotoPerson { id: person.id },
+                            img { src: "/api/faces/{person.face}/thumb", loading: "lazy" }
+                            span { {person.name.clone().unwrap_or("Sans nom".into())} }
+                            small { class: "muted", "{person.count} photos" }
+                        }
+                    }
+                }
+            },
+            Some(Err(e)) => rsx! { p { class: "error", "{e}" } },
+            None => rsx! {},
+        }
+    }
+}
+
+/// Photos d'une personne ; donner le nom d'une autre personne fusionne les deux.
+#[component]
+pub fn PhotoPerson(id: i64) -> Element {
+    let people = use_resource(|| api::get::<People>("/api/people"));
+    let current = people.read().as_ref().and_then(|r| r.as_ref().ok()).and_then(|p| p.people.iter().find(|x| x.id == id).cloned());
+    let mut name = use_signal(String::new);
+    use_effect(use_reactive!(|current| {
+        if let Some(c) = current {
+            name.set(c.name.unwrap_or_default());
+        }
+    }));
+    let mut msg = use_signal(String::new);
+    rsx! {
+        Tabs { active: Tab::People }
+        form { class: "person-name",
+            onsubmit: move |e| async move {
+                e.prevent_default();
+                match api::put::<i64>(&format!("/api/people/{id}"), &name()).await {
+                    Ok(kept) if kept != id => { navigator().replace(Route::PhotoPerson { id: kept }); }
+                    Ok(_) => msg.set("Nom enregistré.".into()),
+                    Err(e) => msg.set(e),
+                }
+            },
+            input { placeholder: "Nom de la personne", value: "{name}", oninput: move |e| name.set(e.value()) }
+            button { class: "btn", r#type: "submit", "Enregistrer" }
+            span { class: "muted small", "{msg}" }
+        }
+        p { class: "muted small", "Astuce : donner le même nom qu'une autre personne regroupe leurs photos." }
+        PhotoList { query: format!("person={id}") }
+    }
+}
+
 /// Dossiers à soi puis dossiers partagés par les autres.
 #[component]
 pub fn PhotoFolders() -> Element {
@@ -299,7 +370,7 @@ fn ShareDialog(folder: PhotoFolder, users: Vec<UserName>, on_close: EventHandler
                         onclick: move |_| {
                             let share = Share { folder: target.clone(), users: picked() };
                             async move {
-                                match api::put("/api/photos/shares", &share).await {
+                                match api::put::<()>("/api/photos/shares", &share).await {
                                     Ok(_) => on_close.call(true),
                                     Err(e) => msg.set(e),
                                 }
