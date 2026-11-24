@@ -47,6 +47,13 @@ CREATE TABLE IF NOT EXISTS faces(
   x REAL NOT NULL, y REAL NOT NULL, w REAL NOT NULL, h REAL NOT NULL, score REAL NOT NULL, embedding BLOB NOT NULL);
 CREATE INDEX IF NOT EXISTS faces_person ON faces(person_id);
 CREATE INDEX IF NOT EXISTS faces_photo ON faces(photo_id);
+-- Playlists personnelles ; une piste supprimée de la bibliothèque disparaît des playlists.
+CREATE TABLE IF NOT EXISTS playlists(
+  id INTEGER PRIMARY KEY, owner INTEGER NOT NULL REFERENCES users ON DELETE CASCADE, name TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS playlist_tracks(
+  playlist_id INTEGER NOT NULL REFERENCES playlists ON DELETE CASCADE, pos INTEGER NOT NULL,
+  item_id INTEGER NOT NULL REFERENCES items ON DELETE CASCADE, PRIMARY KEY(playlist_id, pos));
+CREATE INDEX IF NOT EXISTS playlist_tracks_item ON playlist_tracks(item_id);
 ";
 
 /// Colonnes de `bitflow_shared::Item`, progression de l'utilisateur `?1` incluse.

@@ -175,3 +175,27 @@ pub struct People {
     pub pending: i64,
     pub people: Vec<Person>,
 }
+
+/// Playlist personnelle ; `cover` = pochette de sa première piste qui en a une.
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[cfg_attr(feature = "sqlx", derive(sqlx::FromRow))]
+pub struct Playlist {
+    pub id: i64,
+    pub name: String,
+    pub count: i64,
+    pub duration: f64,
+    pub cover: Option<String>,
+}
+
+/// Création (`name` + pistes) ou remplacement complet (renommage, retrait, réordonnancement).
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+pub struct PlaylistEdit {
+    pub name: String,
+    pub items: Vec<i64>,
+}
+
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+pub struct PlaylistTracks {
+    pub name: String,
+    pub tracks: Vec<Item>,
+}

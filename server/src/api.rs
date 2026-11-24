@@ -22,6 +22,7 @@ pub fn routes() -> Router<App> {
         .route("/users", get(crate::photos::users).post(create_user))
         .route("/scan", get(scan_status).post(rescan))
         .merge(crate::photos::routes())
+        .merge(crate::playlists::routes())
         .route("/items", get(list))
         .route("/resume", get(resume))
         .route("/search", get(search))

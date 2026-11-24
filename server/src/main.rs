@@ -5,6 +5,7 @@ mod faces;
 mod loudness;
 mod musicbrainz;
 mod photos;
+mod playlists;
 mod scan;
 mod stream;
 mod tmdb;

@@ -1,12 +1,15 @@
 mod api;
+mod icons;
 mod music;
 mod photos;
 mod player;
+mod playlists;
 
 use bitflow_shared::{AuthConfig, Credentials, Item, Me, Prefs, Progress, ScanStatus};
 use dioxus::prelude::*;
 use photos::{PhotoAlbum, PhotoFolders, PhotoMap, PhotoPeople, PhotoPerson, Photos};
 use player::Play;
+use playlists::{PlaylistView, Playlists};
 
 const CSS: Asset = asset!("/assets/main.css");
 const HLS: Asset = asset!("/assets/hls.min.js");
@@ -30,6 +33,10 @@ enum Route {
     Music {},
     #[route("/artists")]
     Artists {},
+    #[route("/playlists")]
+    Playlists {},
+    #[route("/playlists/:id")]
+    PlaylistView { id: i64 },
     #[route("/photos")]
     Photos {},
     #[route("/photos/folders")]
@@ -95,19 +102,20 @@ fn Shell() -> Element {
                 },
                 input { r#type: "search", placeholder: "Rechercher…", value: "{q}", oninput: move |e| q.set(e.value()) }
             }
-            Link { to: Route::Settings {}, title: "Paramètres", "⚙" }
+            Link { class: "top-icon", to: Route::Settings {}, title: "Paramètres", {icons::icon(icons::SETTINGS)} }
             if let Some(Ok(me)) = &*me.read_unchecked() {
                 if me.admin {
-                    Link { to: Route::Admin {}, "Admin" }
+                    Link { class: "top-icon", to: Route::Admin {}, title: "Administration", {icons::icon(icons::SHIELD)} }
                 }
                 button {
-                    class: "ghost",
+                    class: "ghost user",
                     title: "Se déconnecter",
                     onclick: move |_| async move {
                         let _ = api::post::<()>("/api/auth/logout", &()).await;
                         api::go("/login");
                     },
-                    "{me.name} ⏻"
+                    "{me.name}"
+                    {icons::icon(icons::LOGOUT)}
                 }
             }
         }
@@ -149,13 +157,23 @@ fn Shows() -> Element {
     rsx! { Grid { title: "Séries", path: "/api/items?kind=show" } }
 }
 
+/// Onglets de la musique ; `active` : 0 albums, 1 artistes, 2 playlists.
+#[component]
+fn MusicTabs(active: u8) -> Element {
+    let tab = |i: u8| if i == active { "tab active" } else { "tab" };
+    rsx! {
+        div { class: "tabs",
+            Link { class: tab(0), to: Route::Music {}, "Albums" }
+            Link { class: tab(1), to: Route::Artists {}, "Artistes" }
+            Link { class: tab(2), to: Route::Playlists {}, "Playlists" }
+        }
+    }
+}
+
 #[component]
 fn Music() -> Element {
     rsx! {
-        div { class: "tabs",
-            Link { class: "tab active", to: Route::Music {}, "Albums" }
-            Link { class: "tab", to: Route::Artists {}, "Artistes" }
-        }
+        MusicTabs { active: 0 }
         Grid { title: "Albums", path: "/api/items?kind=album" }
     }
 }
@@ -163,10 +181,7 @@ fn Music() -> Element {
 #[component]
 fn Artists() -> Element {
     rsx! {
-        div { class: "tabs",
-            Link { class: "tab", to: Route::Music {}, "Albums" }
-            Link { class: "tab active", to: Route::Artists {}, "Artistes" }
-        }
+        MusicTabs { active: 1 }
         Grid { title: "Artistes", path: "/api/items?kind=artist" }
     }
 }
@@ -453,33 +468,39 @@ fn PlaybackPrefs() -> Element {
         section { class: "panel",
             h2 { "Lecture" }
             form { onsubmit: move |e| e.prevent_default(),
-                label { r#for: "audio-lang", "Langue audio préférée" }
-                select {
-                    id: "audio-lang",
-                    onchange: move |e| save(Prefs { audio_lang: Some(e.value()).filter(|v| !v.is_empty()), ..p1.clone() }),
-                    option { value: "", selected: p.audio_lang.is_none(), "Version originale" }
-                    for (k, name) in LANGS {
-                        option { value: *k, selected: p.audio_lang.as_deref() == Some(*k), "{name}" }
+                div { class: "field",
+                    label { r#for: "audio-lang", "Langue audio préférée" }
+                    select {
+                        id: "audio-lang",
+                        onchange: move |e| save(Prefs { audio_lang: Some(e.value()).filter(|v| !v.is_empty()), ..p1.clone() }),
+                        option { value: "", selected: p.audio_lang.is_none(), "Version originale" }
+                        for (k, name) in LANGS {
+                            option { value: *k, selected: p.audio_lang.as_deref() == Some(*k), "{name}" }
+                        }
                     }
                 }
-                label { r#for: "sub-lang", "Langue des sous-titres" }
-                select {
-                    id: "sub-lang",
-                    onchange: move |e| save(Prefs { sub_lang: e.value(), ..p2.clone() }),
-                    for (k, name) in LANGS {
-                        option { value: *k, selected: p.sub_lang == *k, "{name}" }
+                div { class: "field",
+                    label { r#for: "sub-lang", "Langue des sous-titres" }
+                    select {
+                        id: "sub-lang",
+                        onchange: move |e| save(Prefs { sub_lang: e.value(), ..p2.clone() }),
+                        for (k, name) in LANGS {
+                            option { value: *k, selected: p.sub_lang == *k, "{name}" }
+                        }
                     }
                 }
-                label { r#for: "sub-mode", "Afficher les sous-titres automatiquement" }
-                select {
-                    id: "sub-mode",
-                    onchange: move |e| save(Prefs { sub_mode: e.value(), ..p3.clone() }),
-                    for (k, name) in SUB_MODES {
-                        option { value: *k, selected: p.sub_mode == *k, "{name}" }
+                div { class: "field",
+                    label { r#for: "sub-mode", "Sous-titres automatiques" }
+                    select {
+                        id: "sub-mode",
+                        onchange: move |e| save(Prefs { sub_mode: e.value(), ..p3.clone() }),
+                        for (k, name) in SUB_MODES {
+                            option { value: *k, selected: p.sub_mode == *k, "{name}" }
+                        }
                     }
                 }
             }
-            p { class: "muted",
+            p { class: "muted small",
                 "En mode « autre langue », si l'audio est déjà dans votre langue, seuls les sous-titres forcés "
                 "(passages en langue étrangère) sont affichés. Vous pouvez toujours changer de piste pendant la lecture."
             }
@@ -492,26 +513,30 @@ fn PlaybackPrefs() -> Element {
 fn Settings() -> Element {
     let mut quality = use_signal(download_quality);
     rsx! {
-        h1 { "Paramètres" }
-        PlaybackPrefs {}
-        music::MusicSettingsPanel {}
-        section { class: "panel",
-            h2 { "Téléchargements" }
-            label { r#for: "quality", "Qualité des fichiers téléchargés" }
-            select {
-                id: "quality",
-                onchange: move |e| {
-                    api::set_setting(QUALITY_KEY, &e.value());
-                    quality.set(e.value());
-                },
-                for (k, label) in QUALITIES {
-                    option { value: *k, selected: quality() == *k, "{label}" }
+        div { class: "settings",
+            h1 { "Paramètres" }
+            PlaybackPrefs {}
+            section { class: "panel",
+                h2 { "Téléchargements" }
+                div { class: "field",
+                    label { r#for: "quality", "Qualité des fichiers téléchargés" }
+                    select {
+                        id: "quality",
+                        onchange: move |e| {
+                            api::set_setting(QUALITY_KEY, &e.value());
+                            quality.set(e.value());
+                        },
+                        for (k, label) in QUALITIES {
+                            option { value: *k, selected: quality() == *k, "{label}" }
+                        }
+                    }
+                }
+                p { class: "muted small",
+                    "Une qualité inférieure à l'original est convertie par le serveur avant le téléchargement. "
+                    "Si la source est déjà en H.264 et pas plus haute que la qualité choisie, elle est simplement réemballée en MP4 (quasi instantané)."
                 }
             }
-            p { class: "muted",
-                "Une qualité inférieure à l'original est convertie par le serveur avant le téléchargement. "
-                "Si la source est déjà en H.264 et pas plus haute que la qualité choisie, elle est simplement réemballée en MP4 (quasi instantané)."
-            }
+            music::MusicSettingsPanel {}
         }
     }
 }
@@ -522,8 +547,9 @@ fn Admin() -> Element {
     let mut pw = use_signal(String::new);
     let mut msg = use_signal(String::new);
     rsx! {
+        div { class: "settings",
         h1 { "Administration" }
-        section { class: "panel",
+        section { class: "panel wide",
             h2 { "Bibliothèque" }
             LibraryPanel {}
         }
@@ -541,10 +567,11 @@ fn Admin() -> Element {
                 },
                 input { placeholder: "Nom", value: "{name}", oninput: move |e| name.set(e.value()), required: true }
                 input { r#type: "password", placeholder: "Phrase secrète (15 caractères min.)", "autocomplete": "new-password", value: "{pw}", oninput: move |e| pw.set(e.value()), required: true }
-                button { class: "btn", r#type: "submit", "Créer" }
+                button { class: "btn primary", r#type: "submit", "Créer le compte" }
             }
+            p { class: "muted", "{msg}" }
         }
-        p { class: "muted", "{msg}" }
+        }
     }
 }
 

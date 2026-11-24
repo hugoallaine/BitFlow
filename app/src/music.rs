@@ -4,7 +4,7 @@ use dioxus::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use crate::{Card, Route, api, clock};
+use crate::{Card, Route, api, clock, icons::{self as ic, icon}, playlists::AddToPlaylist};
 
 /// File de lecture partagée par toute l'application (fournie dans `App`).
 #[derive(Clone, Default, PartialEq)]
@@ -19,7 +19,7 @@ impl Queue {
     }
 }
 
-fn shuffled(mut v: Vec<Item>) -> Vec<Item> {
+pub fn shuffled(mut v: Vec<Item>) -> Vec<Item> {
     // Fisher-Yates avec l'aléa du navigateur.
     for i in (1..v.len()).rev() {
         v.swap(i, (js_sys::Math::random() * (i + 1) as f64) as usize);
@@ -30,6 +30,7 @@ fn shuffled(mut v: Vec<Item>) -> Vec<Item> {
 #[component]
 pub fn AlbumView(item: Item) -> Element {
     let mut queue = use_context::<Signal<Queue>>();
+    let mut adding = use_signal(|| None::<Vec<i64>>);
     let id = item.id;
     let tracks = use_resource(use_reactive!(|id| async move { api::get::<Vec<Item>>(&format!("/api/items/{id}/children")).await }));
     let list = match &*tracks.read_unchecked() {
@@ -41,6 +42,7 @@ pub fn AlbumView(item: Item) -> Element {
     let playing = queue.read().current().map(|t| t.id);
     let multi_disc = list.iter().filter_map(|t| t.season).max().unwrap_or(1) > 1;
     let (l1, l2) = (list.clone(), list.clone());
+    let ids: Vec<i64> = list.iter().map(|t| t.id).collect();
     rsx! {
         div { class: "album-head",
             if let Some(src) = api::img(&item.poster, "poster") {
@@ -59,10 +61,14 @@ pub fn AlbumView(item: Item) -> Element {
                     span { "{list.len()} pistes · {clock(total)}" }
                 }
                 div { class: "actions",
-                    button { class: "btn primary", onclick: move |_| queue.set(Queue { tracks: l1.clone(), index: 0 }), "▶ Lecture" }
-                    button { class: "btn", onclick: move |_| queue.set(Queue { tracks: shuffled(l2.clone()), index: 0 }), "⤮ Aléatoire" }
+                    button { class: "btn primary", onclick: move |_| queue.set(Queue { tracks: l1.clone(), index: 0 }), {icon(ic::PLAY)} "Lecture" }
+                    button { class: "btn", onclick: move |_| queue.set(Queue { tracks: shuffled(l2.clone()), index: 0 }), {icon(ic::SHUFFLE)} "Aléatoire" }
+                    button { class: "btn", onclick: move |_| adding.set(Some(ids.clone())), {icon(ic::PLAYLIST_ADD)} "Ajouter à une playlist" }
                 }
             }
+        }
+        if let Some(items) = adding() {
+            AddToPlaylist { items, on_close: move |_| adding.set(None) }
         }
         ol { class: "tracklist",
             for (i, t) in list.iter().cloned().enumerate() {
@@ -92,14 +98,17 @@ pub fn AlbumView(item: Item) -> Element {
                             small { "{t.artist.clone().unwrap_or_default()}" }
                         }
                     }
-                    button {
-                        class: "ghost",
-                        title: "Ajouter à la file",
-                        onclick: {
-                            let t = t.clone();
-                            move |_| queue.write().tracks.push(t.clone())
-                        },
-                        "+"
+                    div { class: "t-actions",
+                        button { class: "ghost", title: "Ajouter à une playlist", onclick: move |_| adding.set(Some(vec![t.id])), {icon(ic::PLAYLIST_ADD)} }
+                        button {
+                            class: "ghost",
+                            title: "Ajouter à la file de lecture",
+                            onclick: {
+                                let t = t.clone();
+                                move |_| queue.write().tracks.push(t.clone())
+                            },
+                            {icon(ic::ADD)}
+                        }
                     }
                     span { class: "dur", "{clock(t.duration.unwrap_or(0.0))}" }
                 }
@@ -198,7 +207,10 @@ while (true) {
     graph(); if (ctx.state === 'suspended') ctx.resume();
     xf = m.xf;
     const c = E[cur];
-    if (c.id !== m.cur.id) {
+    if (m.resume != null) {
+      // Barre recréée (retour du lecteur vidéo) : même piste, en pause à la même position.
+      load(c, m.cur); setGain(c, c.norm); c.a.currentTime = m.resume;
+    } else if (c.id !== m.cur.id) {
       // Autre piste demandée (clic, précédent, suivant manuel) : coupure nette.
       E.forEach(e => e.a.pause()); fading = false;
       load(c, m.cur); setGain(c, c.norm); c.a.play().catch(() => {});
@@ -298,6 +310,11 @@ fn consecutive(a: &Item, b: &Item) -> bool {
     a.parent_id == b.parent_id && a.season == b.season && a.episode.zip(b.episode).is_some_and(|(x, y)| y == x + 1)
 }
 
+thread_local! {
+    /// Position de lecture, conservée quand la barre est démontée (lecteur vidéo plein écran).
+    static LAST_T: std::cell::Cell<f64> = const { std::cell::Cell::new(0.0) };
+}
+
 const SLEEP: &[(&str, f64)] = &[("Désactivée", 0.0), ("15 min", 15.0), ("30 min", 30.0), ("1 h", 60.0), ("Fin de la piste", -1.0)];
 
 /// Barre de lecture en bas de l'écran ; reste active pendant la navigation (montée dans `Shell`).
@@ -317,6 +334,9 @@ pub fn MusicBar() -> Element {
     let mut scrub = use_signal(|| None::<f64>);
     let mut sleep = use_signal(|| 0usize);
     let mut sleep_at = use_signal(|| 0.0);
+    let mut adding = use_signal(|| None::<Vec<i64>>);
+    // Premier `set` après le montage : une file existante vient d'une barre démontée, on ne relance pas.
+    let fresh = use_hook(|| std::rc::Rc::new(std::cell::Cell::new(queue.peek().current().is_some())));
     let send = move |c: serde_json::Value| {
         let _ = bridge.send(c);
     };
@@ -339,7 +359,8 @@ pub fn MusicBar() -> Element {
                     "fade": s.crossfade > 0.0 && !(s.smart && consecutive(cur, n)) })
         });
         let art = api::img(&cur.poster, "poster").map(|u| format!("{}{u}", api::origin()));
-        send(json!({ "op": "set", "xf": s.crossfade, "next": next, "cur": {
+        let resume = fresh.replace(false).then(|| LAST_T.get());
+        send(json!({ "op": "set", "xf": s.crossfade, "next": next, "resume": resume, "cur": {
             "id": cur.id, "url": format!("/api/play/{}/audio", cur.id), "gain": norm_gain(cur, &s.norm, album_mode),
             "title": cur.title, "artist": cur.artist, "art": art } }));
     });
@@ -371,6 +392,7 @@ pub fn MusicBar() -> Element {
         let mut b = bridge;
         while let Ok(s) = b.recv::<AudioState>().await {
             t.set(s.t);
+            LAST_T.set(s.t);
             d.set(s.d);
             paused.set(s.paused);
             match s.action.as_deref() {
@@ -396,13 +418,20 @@ pub fn MusicBar() -> Element {
     rsx! {
         audio { id: "bf-audio-a" }
         audio { id: "bf-audio-b" }
+        // Hors de la barre : son flou d'arrière-plan confinerait la fenêtre à la barre.
+        if let Some(items) = adding() {
+            AddToPlaylist { items, on_close: move |_| adding.set(None) }
+        }
         if let Some(cur) = q.current().cloned() {
             div { class: "musicbar",
                 if panel() == "queue" {
                     div { class: "queue panel",
                         div { class: "queue-head",
                             h2 { "File de lecture" }
-                            button { class: "ghost", onclick: move |_| { send(json!({ "op": "stop" })); queue.set(Queue::default()); }, "Vider" }
+                            div {
+                                button { class: "ghost", onclick: move |_| adding.set(Some(queue.read().tracks.iter().map(|t| t.id).collect())), "Enregistrer en playlist" }
+                                button { class: "ghost", onclick: move |_| { send(json!({ "op": "stop" })); queue.set(Queue::default()); }, "Vider" }
+                            }
                         }
                         ol {
                             for (i, tr) in q.tracks.iter().cloned().enumerate() {
@@ -420,7 +449,7 @@ pub fn MusicBar() -> Element {
                                                 q.tracks.remove(i);
                                                 if i < q.index { q.index -= 1; }
                                             },
-                                            "×"
+                                            {icon(ic::CLOSE)}
                                         }
                                     }
                                 }
@@ -444,17 +473,18 @@ pub fn MusicBar() -> Element {
                 }
                 div { class: "mb-center",
                     div { class: "mb-buttons",
-                        button { class: if shuffle() { "icon on" } else { "icon" }, title: "Aléatoire", onclick: move |_| shuffle.toggle(), "⤮" }
-                        button { class: "icon", title: "Précédent", onclick: move |_| prev(), "⏮" }
+                        button { class: if shuffle() { "icon on" } else { "icon" }, title: "Aléatoire", onclick: move |_| shuffle.toggle(), {icon(ic::SHUFFLE)} }
+                        button { class: "icon", title: "Précédent", onclick: move |_| prev(), {icon(ic::PREV)} }
                         button { class: "icon big", title: "Lecture/Pause", onclick: move |_| send(json!({ "op": "toggle" })),
-                            if paused() { "▶" } else { "⏸" }
+                            {icon(if paused() { ic::PLAY } else { ic::PAUSE })}
                         }
-                        button { class: "icon", title: "Suivant", onclick: move |_| skip(), "⏭" }
+                        button { class: "icon", title: "Suivant", onclick: move |_| skip(), {icon(ic::NEXT)} }
+                        button { class: "icon", title: "Arrêter et fermer", onclick: move |_| { send(json!({ "op": "stop" })); queue.set(Queue::default()); }, {icon(ic::STOP)} }
                         button {
                             class: if repeat() > 0 { "icon on" } else { "icon" },
                             title: match repeat() { 0 => "Répéter : non", 1 => "Répéter : toute la file", _ => "Répéter : la piste" },
                             onclick: move |_| repeat.set((repeat() + 1) % 3),
-                            if repeat() == 2 { "🔂" } else { "🔁" }
+                            {icon(if repeat() == 2 { ic::REPEAT_ONE } else { ic::REPEAT })}
                         }
                     }
                     div { class: "mb-seek",
@@ -486,10 +516,10 @@ pub fn MusicBar() -> Element {
                             sleep.set(n);
                             sleep_at.set(js_sys::Date::now() + SLEEP[n].1 * 60_000.0);
                         },
-                        "☾"
+                        {icon(ic::SLEEP)}
                         if sleep() > 0 { small { "{SLEEP[sleep()].0}" } }
                     }
-                    button { class: if panel() == "eq" || settings.read().eq { "icon on" } else { "icon" }, title: "Égaliseur", onclick: move |_| toggle_panel("eq"), "≋" }
+                    button { class: if panel() == "eq" || settings.read().eq { "icon on" } else { "icon" }, title: "Égaliseur", onclick: move |_| toggle_panel("eq"), {icon(ic::EQ)} }
                     input { class: "volume", r#type: "range", min: "0", max: "1", step: "0.05", value: "{volume}", "aria-label": "Volume", style: "--pos:{volume() * 100.0:.0}%;--buf:0%",
                         oninput: move |e| {
                             let v: f64 = e.value().parse().unwrap_or(1.0);
@@ -497,7 +527,7 @@ pub fn MusicBar() -> Element {
                             send(json!({ "op": "volume", "v": v }));
                         },
                     }
-                    button { class: if panel() == "queue" { "icon on" } else { "icon" }, title: "File de lecture", onclick: move |_| toggle_panel("queue"), "☰" }
+                    button { class: if panel() == "queue" { "icon on" } else { "icon" }, title: "File de lecture", onclick: move |_| toggle_panel("queue"), {icon(ic::QUEUE)} }
                 }
             }
         }
@@ -561,28 +591,43 @@ pub fn MusicSettingsPanel() -> Element {
     let mut s = use_context::<Signal<MusicSettings>>();
     let cur = s.read().clone();
     rsx! {
-        section { class: "panel",
-            h2 { "Musique (cet appareil)" }
-            form { onsubmit: move |e| e.prevent_default(),
-                label { r#for: "norm", "Normalisation du volume" }
-                select { id: "norm", onchange: move |e| s.write().norm = e.value(),
-                    for (k, label) in [("auto", "Automatique (album entier : gain d'album, sinon piste)"), ("track", "Par piste"), ("album", "Par album"), ("off", "Désactivée")] {
-                        option { value: k, selected: cur.norm == k, "{label}" }
+        section { class: "panel wide",
+            h2 { "Musique " small { class: "muted", "réglages de cet appareil" } }
+            div { class: "music-settings",
+                div {
+                    form { onsubmit: move |e| e.prevent_default(),
+                        div { class: "field",
+                            label { r#for: "norm", "Normalisation du volume" }
+                            select { id: "norm", onchange: move |e| s.write().norm = e.value(),
+                                for (k, label) in [("auto", "Automatique"), ("track", "Par piste"), ("album", "Par album"), ("off", "Désactivée")] {
+                                    option { value: k, selected: cur.norm == k, "{label}" }
+                                }
+                            }
+                        }
+                        div { class: "field",
+                            label { r#for: "xf", "Fondu enchaîné"
+                                small { if cur.crossfade > 0.0 { "{cur.crossfade:.0} s" } else { "désactivé : enchaînement sans blanc" } }
+                            }
+                            input { id: "xf", r#type: "range", min: "0", max: "12", step: "1", value: "{cur.crossfade}",
+                                style: "--pos:{cur.crossfade / 12.0 * 100.0:.0}%;--buf:0%",
+                                class: "volume",
+                                oninput: move |e| s.write().crossfade = e.value().parse().unwrap_or(0.0),
+                            }
+                        }
+                        div { class: "field",
+                            label { r#for: "smart", "Fondu intelligent"
+                                small { "pas de fondu entre deux pistes qui se suivent sur un album" }
+                            }
+                            input { id: "smart", class: "toggle", r#type: "checkbox", checked: cur.smart, onchange: move |e| s.write().smart = e.checked() }
+                        }
+                    }
+                    p { class: "muted small",
+                        "Automatique : gain d'album quand on écoute un album en entier, sinon gain de piste. "
+                        "La normalisation vise -18 LUFS (référence ReplayGain 2.0) et utilise les tags ReplayGain s'ils existent, "
+                        "sinon l'analyse faite par le serveur. Le gain est plafonné pour ne jamais saturer."
                     }
                 }
-                label { r#for: "xf", "Fondu enchaîné : " if cur.crossfade > 0.0 { "{cur.crossfade:.0} s" } else { "désactivé (enchaînement sans blanc)" } }
-                input { id: "xf", r#type: "range", min: "0", max: "12", step: "1", value: "{cur.crossfade}",
-                    oninput: move |e| s.write().crossfade = e.value().parse().unwrap_or(0.0),
-                }
-                label { class: "switch",
-                    input { r#type: "checkbox", checked: cur.smart, onchange: move |e| s.write().smart = e.checked() }
-                    " Fondu intelligent : pas de fondu entre deux pistes qui se suivent sur un album"
-                }
-            }
-            Equalizer {}
-            p { class: "muted",
-                "La normalisation vise -18 LUFS (référence ReplayGain 2.0) et utilise les tags ReplayGain s'ils existent, "
-                "sinon l'analyse faite par le serveur. Le gain est plafonné pour ne jamais saturer."
+                Equalizer {}
             }
         }
     }
